@@ -1,0 +1,23 @@
+[
+  {
+    "_id": "69a969581ef8abb9ccf54249",
+    "name": "Moti Da",
+    "phone_no": "76562656134",
+    "credit_balance": 0,
+    "__v": 0
+  },
+  {
+    "_id": "69a96b0a1ef8abb9ccf5427e",
+    "name": "Asadul",
+    "phone_no": "7667667200",
+    "credit_balance": 0,
+    "__v": 0
+  },
+  {
+    "_id": "69b0fe4ae3872a9b4d857446",
+    "name": "SK ASFQUE KORIM",
+    "phone_no": "96414233",
+    "credit_balance": 0,
+    "__v": 0
+  }
+]
