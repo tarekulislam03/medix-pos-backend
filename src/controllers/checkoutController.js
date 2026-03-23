@@ -136,13 +136,6 @@ const checkout = async (req, res) => {
         );
 
         // Final Financial Calculations
-        // Prevent system overpayment
-        if (paidAmount > (grandTotal + previousCredit + 0.01)) {
-            return res.status(400).json({
-                message: "Amount paid exceeds total payable"
-            });
-        }
-
         const remainingForBill = paidAmount - previousDuePayment;
 
         let dueAmount = Number(
