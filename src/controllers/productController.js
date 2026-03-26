@@ -3,6 +3,12 @@ import Inventory from "../models/productModel.js";
 import sharp from "sharp";
 import { callVisionModel } from "../services/llmService.js";
 import { safeParseJSON } from "../services/jsonParser.js";
+import {
+    searchCache,
+    upsertCacheEntry,
+    removeCacheEntry,
+    loadProducts,
+} from "../services/productCacheService.js";
 
 const escapeRegExp = (string) => {
     return string.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -63,6 +69,9 @@ const createProduct = async (req, res) => {
 
             await product.save();
 
+            // Sync cache immediately
+            upsertCacheEntry(req.storeId, product);
+
             return res.status(200).json({
                 message: "Product updated",
                 data: product
@@ -88,6 +97,9 @@ const createProduct = async (req, res) => {
                 tablets_per_strip: tablets_per_strip ? cleanNumber(tablets_per_strip) : null,
                 cost_price: cost_price ? cleanNumber(cost_price) : null
             });
+
+            // Sync cache immediately
+            upsertCacheEntry(req.storeId, product);
 
             return res.status(201).json({
                 message: "Product created",
@@ -178,6 +190,9 @@ const updateProduct = async (req, res) => {
             })
         }
 
+        // Sync cache immediately
+        upsertCacheEntry(req.storeId, update);
+
         res.status(200).json({
             message: "Product updated successfully!",
             data: update
@@ -203,6 +218,9 @@ const deleteProduct = async (req, res) => {
             })
         }
 
+        // Remove from cache immediately
+        removeCacheEntry(req.storeId, req.params.id);
+
         res.status(200).json({
             message: "Product delted successfully!",
         })
@@ -216,46 +234,33 @@ const deleteProduct = async (req, res) => {
     }
 }
 
-// SearcH Products 
+// Search Products (in-memory cache — zero DB queries)
 
 const searchProduct = async (req, res) => {
     try {
+        const keyword = req.query.keyword || req.query.q || "";
 
-        const keyword = req.query.keyword || "";
-
-        // Validation
-        if (!keyword) {
-            res.status(400).json({
-                message: "Search keywords are required"
-
-            })
-        }
-
-        const product = await Inventory.find({
-            storeId: req.storeId,
-            $or: [
-                { medicine_name: { $regex: keyword, $options: "i" } },
-                { barcode: keyword },
-                { short_barcode: keyword }
-            ]
-        });
-
-        if (!product || product.length === 0) {
-            return res.status(400).json({
-                message: "No products found for this keyword"
+        // Handle empty or missing query
+        if (!keyword || keyword.trim() === "") {
+            return res.status(200).json({
+                count: "0 products found",
+                data: [],
             });
         }
 
-        res.status(200).json({
-            count: `${product.length} products found for this keyword`,
-            data: product,
+        // Search from in-memory cache (top 10 results)
+        const results = searchCache(req.storeId.toString(), keyword, 10);
+
+        return res.status(200).json({
+            count: `${results.length} products found for this keyword`,
+            data: results,
         });
 
     } catch (error) {
-        console.log(error);
+        console.error("Search error:", error);
         res.status(500).json({
             message: "Internal Server Error",
-            data: error
+            data: error.message,
         });
     }
 }
@@ -476,6 +481,9 @@ const autoImportConfirm = async (req, res) => {
                 updatedCount++;
             }
         }
+
+        // Reload cache after bulk import to capture all new/updated products
+        await loadProducts();
 
         return res.json({
             success: true,

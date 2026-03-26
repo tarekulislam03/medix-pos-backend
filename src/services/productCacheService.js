@@ -22,6 +22,7 @@ const loadProducts = async () => {
         const grouped = new Map();
 
         for (const p of products) {
+            if (!p.storeId) continue; // Skip products without a storeId
             const storeKey = p.storeId.toString();
 
             if (!grouped.has(storeKey)) {
@@ -31,7 +32,7 @@ const loadProducts = async () => {
             grouped.get(storeKey).push({
                 _id: p._id,
                 name: p.medicine_name,
-                nameLower: p.medicine_name.toLowerCase(),
+                nameLower: (p.medicine_name || "").toLowerCase(),
                 price: p.mrp,
                 stock: p.quantity,
                 barcode: p.barcode || "",
@@ -135,11 +136,12 @@ const searchCache = (storeId, query, limit = 10) => {
  * @param {object} product – the Mongoose document or plain object
  */
 const upsertCacheEntry = (storeId, product) => {
+    if (!storeId) return;
     const key = storeId.toString();
     const entry = {
         _id: product._id,
         name: product.medicine_name,
-        nameLower: product.medicine_name.toLowerCase(),
+        nameLower: (product.medicine_name || "").toLowerCase(),
         price: product.mrp,
         stock: product.quantity,
         barcode: product.barcode || "",
@@ -173,6 +175,7 @@ const upsertCacheEntry = (storeId, product) => {
  * @param {string} productId
  */
 const removeCacheEntry = (storeId, productId) => {
+    if (!storeId) return;
     const key = storeId.toString();
     const list = productCache.get(key);
     if (!list) return;
