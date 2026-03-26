@@ -24,4 +24,9 @@ app.use("/api/v1/sales", protect, salesRouter)
 app.use("/api/v1/customer", protect, customerRouter)
 app.use('/api/v1/barcode', protect, labelRouter);
 
+
+app.get("/health", (req, res) => {
+    res.status(200).json({ status: "ok" });
+});
+
 export default app;
