@@ -9,6 +9,8 @@ const SalesSchema = new mongoose.Schema({
         ref: "Customer",
         required: false
     },
+    customer_name: { type: String },
+    customer_phone: { type: String },
     items: [
         {
             product_id: {
@@ -50,6 +52,7 @@ const SalesSchema = new mongoose.Schema({
     total_discount: Number,
     grand_total: Number,
     amount_paid: Number,
+    previous_due_payment: { type: Number, default: 0 },
     due_amount: Number,
 
     payment_method: {

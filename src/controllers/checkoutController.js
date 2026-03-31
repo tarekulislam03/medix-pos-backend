@@ -153,7 +153,7 @@ const checkout = async (req, res) => {
         const sale = await Sales.create({
             invoice_number: invoiceNumber,
             customer: customer ? customer._id : null,
-            customer_name: customer ? customer.name : null,
+            customer_name: customer ? customer.name : (req.body.customer_name_fallback || null),
             customer_phone: customer ? customer.phone_no : null,
             items: saleItems,
             subtotal,
