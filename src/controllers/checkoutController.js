@@ -9,7 +9,9 @@ const checkout = async (req, res) => {
             items,
             payment_method,
             amount_paid = 0,
-            previous_due_payment = 0
+            previous_due_payment = 0,
+            doctor_fee = 0,
+            otc_items = []
         } = req.body;
 
 
@@ -131,9 +133,29 @@ const checkout = async (req, res) => {
         subtotal = Number(subtotal.toFixed(2));
         total_discount = Number(total_discount.toFixed(2));
 
-        const grandTotal = Number(
-            (subtotal - total_discount).toFixed(2)
-        );
+        const medicineTotalAfterDiscount = Number((subtotal - total_discount).toFixed(2));
+
+        // Doctor fee — not discounted
+        const doctorFee = Number(Number(doctor_fee || 0).toFixed(2));
+        if (isNaN(doctorFee) || doctorFee < 0) {
+            return res.status(400).json({ message: "Invalid doctor fee" });
+        }
+
+        // OTC items — not discounted
+        const otcList = Array.isArray(otc_items) ? otc_items : [];
+        let otcTotal = 0;
+        const sanitizedOtcItems = [];
+        for (const otcItem of otcList) {
+            const price = Number(otcItem.price || 0);
+            if (!otcItem.name || isNaN(price) || price < 0) {
+                return res.status(400).json({ message: `Invalid OTC item: ${otcItem.name || 'unknown'}` });
+            }
+            otcTotal += price;
+            sanitizedOtcItems.push({ name: String(otcItem.name).trim(), price: Number(price.toFixed(2)) });
+        }
+        otcTotal = Number(otcTotal.toFixed(2));
+
+        const grandTotal = Number((medicineTotalAfterDiscount + doctorFee + otcTotal).toFixed(2));
 
         // Final Financial Calculations
         const remainingForBill = paidAmount - previousDuePayment;
@@ -158,6 +180,9 @@ const checkout = async (req, res) => {
             items: saleItems,
             subtotal,
             total_discount,
+            doctor_fee: doctorFee,
+            otc_items: sanitizedOtcItems,
+            otc_total: otcTotal,
             grand_total: grandTotal,
             amount_paid: paidAmount,
             previous_due_payment: previousDuePayment,

@@ -50,6 +50,14 @@ const SalesSchema = new mongoose.Schema({
 
     subtotal: Number,
     total_discount: Number,
+    doctor_fee: { type: Number, default: 0 },
+    otc_items: [
+        {
+            name: { type: String, required: true },
+            price: { type: Number, required: true, default: 0 }
+        }
+    ],
+    otc_total: { type: Number, default: 0 },
     grand_total: Number,
     amount_paid: Number,
     previous_due_payment: { type: Number, default: 0 },
