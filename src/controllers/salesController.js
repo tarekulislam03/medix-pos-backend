@@ -352,4 +352,46 @@ const updateSaleById = async (req, res) => {
     }
 };
 
-export { todaySales, monthlySales, getSalesHistory, getSaleById, updateSaleById };
+const deleteSaleById = async (req, res) => {
+    try {
+        const { id } = req.params;
+
+        const sale = await Sales.findOne({ _id: id, storeId: req.storeId });
+        if (!sale) {
+            return res.status(404).json({ success: false, message: "Sale not found" });
+        }
+
+        // 1. Revert Inventory — restore stock for each item sold
+        for (const item of sale.items) {
+            const product = await Inventory.findOne({ _id: item.product_id, storeId: req.storeId });
+            if (product) {
+                product.quantity += item.quantity;
+                await product.save();
+            }
+        }
+
+        // 2. Revert Customer Credit Balance
+        if (sale.customer && sale.due_amount > 0) {
+            const customer = await Customer.findOne({ _id: sale.customer, storeId: req.storeId });
+            if (customer) {
+                customer.credit_balance -= sale.due_amount;
+                if (customer.credit_balance < 0) customer.credit_balance = 0;
+                await customer.save();
+            }
+        }
+
+        // 3. Delete the sale document
+        await Sales.deleteOne({ _id: id, storeId: req.storeId });
+
+        return res.status(200).json({
+            success: true,
+            message: "Sale deleted successfully"
+        });
+
+    } catch (error) {
+        console.error(error);
+        res.status(500).json({ success: false, message: "Failed to delete sale" });
+    }
+};
+
+export { todaySales, monthlySales, getSalesHistory, getSaleById, updateSaleById, deleteSaleById };
