@@ -14,6 +14,7 @@ import billingRouter from "./routes/billingRoutes.js";
 import salesRouter from "./routes/salesRoutes.js";
 import customerRouter from "./routes/customerRoutes.js";
 import labelRouter from "./routes/labelRoutes.js";
+import settingsRouter from "./routes/settingsRoutes.js";
 
 app.use("/api/v1/user", userRouter)
 
@@ -23,6 +24,7 @@ app.use("/api/v1/billing", protect, billingRouter)
 app.use("/api/v1/sales", protect, salesRouter)
 app.use("/api/v1/customer", protect, customerRouter)
 app.use('/api/v1/barcode', protect, labelRouter);
+app.use('/api/v1/settings', protect, settingsRouter);
 
 
 app.get("/health", (req, res) => {
