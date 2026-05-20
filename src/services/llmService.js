@@ -4,7 +4,7 @@ export const callVisionModel = async (base64Image) => {
   const response = await axios.post(
     "https://openrouter.ai/api/v1/chat/completions",
     {
-      model: "nvidia/nemotron-nano-12b-v2-vl:free",
+      model: "google/gemini-2.0-flash-001",
       max_tokens: 4096,
       temperature: 0,
       messages: [
