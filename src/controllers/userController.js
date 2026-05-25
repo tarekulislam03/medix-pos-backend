@@ -58,16 +58,28 @@ const loginUser = async (req, res) => {
   try {
     const { phone, password } = req.body;
 
+
+    // Security layers
+    if (typeof phone !== 'string' || typeof password !== 'string') {
+      return res.status(400).json({ error: 'Invalid input' });
+    };
+
+    if (!/^\d{10}$/.test(phone)) {
+      return res.status(400).json({ error: 'Invalid phone number' });
+    };
+
+
     const user = await User.findOne({ phone }).populate("storeId");
 
+
     if (!user) {
-      return res.status(401).json({ message: "Phone Number Not Found!" });
+      return res.status(401).json({ message: "Invalid Credentials!" });
     }
 
     const validPassword = await bcrypt.compare(password, user.password);
 
     if (!validPassword) {
-      return res.status(401).json({ message: "Password Wrong!" });
+      return res.status(401).json({ message: "Invalid Credentials!" });
     }
 
     const token = jwt.sign(
@@ -98,21 +110,21 @@ const loginUser = async (req, res) => {
 
 // logout 
 const logoutUser = async (req, res) => {
-    try {
-        res.cookie("token", "", {
-            httpOnly: true,
-            expires: new Date(0)
-        });
+  try {
+    res.cookie("token", "", {
+      httpOnly: true,
+      expires: new Date(0)
+    });
 
-        res.status(200).json({
-            message: "Logged out successfully"
-        });
+    res.status(200).json({
+      message: "Logged out successfully"
+    });
 
-    } catch (error) {
-        res.status(500).json({
-            message: "Logout failed"
-        });
-    }
+  } catch (error) {
+    res.status(500).json({
+      message: "Logout failed"
+    });
+  }
 };
 
 export { registerUser, loginUser, logoutUser };
