@@ -36,7 +36,10 @@ const createProduct = async (req, res) => {
             expiry_date,
             alert_threshold,
             tablets_per_strip,
-            cost_price
+            cost_price,
+            batch_number,
+            hsn_code,
+            gst
         } = req.body;
 
         if (!medicine_name || !mrp || !quantity) {
@@ -66,6 +69,9 @@ const createProduct = async (req, res) => {
             product.alert_threshold = alert_threshold || null;
             product.tablets_per_strip = tablets_per_strip ? cleanNumber(tablets_per_strip) : null;
             product.cost_price = cost_price ? cleanNumber(cost_price) : null;
+            product.batch_number = batch_number || "";
+            product.hsn_code = hsn_code || "";
+            product.gst = gst ? cleanNumber(gst) : 0;
 
             await product.save();
 
@@ -95,7 +101,10 @@ const createProduct = async (req, res) => {
                 expiry_date: expiry_date || null,
                 alert_threshold: alert_threshold || null,
                 tablets_per_strip: tablets_per_strip ? cleanNumber(tablets_per_strip) : null,
-                cost_price: cost_price ? cleanNumber(cost_price) : null
+                cost_price: cost_price ? cleanNumber(cost_price) : null,
+                batch_number: batch_number || "",
+                hsn_code: hsn_code || "",
+                gst: gst ? cleanNumber(gst) : 0
             });
 
             // Sync cache immediately
@@ -458,7 +467,10 @@ const autoImportConfirm = async (req, res) => {
                         mrp: cleanNumber(item.mrp),
                         expiry_date: item.expiry_date || null,
                         cost_price: item.cost_price ? cleanNumber(item.cost_price) : null,
-                        supplier_name: item.supplier_name || null
+                        supplier_name: item.supplier_name || null,
+                        batch_number: item.batch_number || "",
+                        hsn_code: item.hsn_code || "",
+                        gst: item.gst ? cleanNumber(item.gst) : 0
                     },
                     $setOnInsert: {
                         storeId: req.storeId,

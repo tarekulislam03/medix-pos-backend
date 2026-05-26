@@ -23,12 +23,15 @@ Fields required:
 - expiry_date
 - cost_price ("RATE" in bills)
 - supplier_name
+- batch_number ("BATCH", "BATCH NO", "B. NO" etc.)
+- hsn_code ("HSN", "HSN CODE" etc.)
+- gst (percentage number, e.g., 5, 12, 18, or 28, representing "GST", "TAX", "GST RATE" etc.)
 
 Rules:
 - Return ONLY valid JSON
 - Do NOT explain
 - Do NOT add markdown
-- If expiry_date not found return null
+- If expiry_date, batch_number, hsn_code, or gst is not found, return null or default values
 - MRP column rule (IMPORTANT):
   * If the bill has TWO MRP columns — one labeled "Old MRP", "O.MRP", "O. MRP", or similar, AND another labeled "New MRP", "N.MRP", "N. MRP", or similar — use ONLY the NEW MRP value as the "mrp" field.
   * If the bill has only ONE MRP column (regardless of label), use that value as the "mrp" field.
@@ -43,7 +46,10 @@ Format:
       "quantity":0,
       "expiry_date":"",
       "cost_price":0,
-      "supplier_name":""
+      "supplier_name":"",
+      "batch_number":"",
+      "hsn_code":"",
+      "gst":0
     }
   ]
 }

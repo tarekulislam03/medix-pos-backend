@@ -47,6 +47,18 @@ const inventorySchema = new Schema({
         type: Number,
         default: null
     },
+    batch_number: {
+        type: String,
+        default: ""
+    },
+    hsn_code: {
+        type: String,
+        default: ""
+    },
+    gst: {
+        type: Number,
+        default: 0
+    },
     storeId: {
         type: mongoose.Schema.Types.ObjectId,
         ref: "Store",

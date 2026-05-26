@@ -15,7 +15,7 @@ let _refreshInterval = null;
 const loadProducts = async () => {
     try {
         const products = await Inventory.find({})
-            .select("medicine_name mrp quantity barcode short_barcode tablets_per_strip cost_price expiry_date supplier_name storeId")
+            .select("medicine_name mrp quantity barcode short_barcode tablets_per_strip cost_price expiry_date supplier_name batch_number hsn_code gst storeId")
             .lean();
 
         // Group by storeId and normalize names to lowercase for faster search
@@ -41,6 +41,9 @@ const loadProducts = async () => {
                 cost_price: p.cost_price || null,
                 expiry_date: p.expiry_date || null,
                 supplier_name: p.supplier_name || null,
+                batch_number: p.batch_number || "",
+                hsn_code: p.hsn_code || "",
+                gst: p.gst || 0,
             });
         }
 
@@ -119,6 +122,9 @@ const searchCache = (storeId, query, limit = 10) => {
                 cost_price: product.cost_price,
                 expiry_date: product.expiry_date,
                 supplier_name: product.supplier_name,
+                batch_number: product.batch_number || "",
+                hsn_code: product.hsn_code || "",
+                gst: product.gst || 0,
             });
 
             if (results.length >= limit) break;
@@ -150,6 +156,9 @@ const upsertCacheEntry = (storeId, product) => {
         cost_price: product.cost_price || null,
         expiry_date: product.expiry_date || null,
         supplier_name: product.supplier_name || null,
+        batch_number: product.batch_number || "",
+        hsn_code: product.hsn_code || "",
+        gst: product.gst || 0,
     };
 
     if (!productCache.has(key)) {

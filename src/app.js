@@ -9,15 +9,16 @@ const app = express();
 
 // 1. Allowed origins
 const allowedOrigins = [
+  'http://localhost:8081',
   'http://localhost:5173',
   'http://localhost:3000',
-  'https://medix-pos.vercel.app',  // ← your real frontend URL
+  'https://medix-pos.vercel.app', 
 ];
 
 // 2. Security headers
 app.use(helmet());
 
-// 3. CORS — must be before routes
+// 3. CORS 
 app.use(cors({
   origin: (origin, callback) => {
     if (!origin) return callback(null, true);
