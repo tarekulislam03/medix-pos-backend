@@ -13,6 +13,7 @@ const allowedOrigins = [
   'http://localhost:5173',
   'http://localhost:3000',
   'https://medix-pos.vercel.app', 
+  'http://localhost:63518',
 ];
 
 // 2. Security headers
@@ -35,7 +36,7 @@ app.use(cors({
 }));
 
 // 4. Parse body
-app.use(express.json({ limit: '10kb' }));
+app.use(express.json({ limit: '200kb' }));
 app.use(cookieParser());
 
 // 5. Sanitize

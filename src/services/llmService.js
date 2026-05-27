@@ -35,6 +35,8 @@ Rules:
 - MRP column rule (IMPORTANT):
   * If the bill has TWO MRP columns — one labeled "Old MRP", "O.MRP", "O. MRP", or similar, AND another labeled "New MRP", "N.MRP", "N. MRP", or similar — use ONLY the NEW MRP value as the "mrp" field.
   * If the bill has only ONE MRP column (regardless of label), use that value as the "mrp" field.
+- GST column rule (IMPORTANT):
+  * If a combined "GST" column is not explicitly available, but separate "CGST" and "SGST" columns exist, add their percentage values together to determine the final "gst" (e.g., if CGST is 6% and SGST is 6%, gst is 12).
 
 Format:
 

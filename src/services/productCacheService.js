@@ -50,6 +50,13 @@ const loadProducts = async () => {
         // Replace the entire cache atomically
         productCache.clear();
         for (const [key, val] of grouped) {
+            // Sort by expiry_date ascending (FEFO logic). Nulls at the bottom.
+            val.sort((a, b) => {
+                if (!a.expiry_date && !b.expiry_date) return 0;
+                if (!a.expiry_date) return 1;
+                if (!b.expiry_date) return -1;
+                return new Date(a.expiry_date) - new Date(b.expiry_date);
+            });
             productCache.set(key, val);
         }
 
@@ -176,6 +183,14 @@ const upsertCacheEntry = (storeId, product) => {
     } else {
         list.push(entry); // new product
     }
+
+    // Re-sort for FEFO
+    list.sort((a, b) => {
+        if (!a.expiry_date && !b.expiry_date) return 0;
+        if (!a.expiry_date) return 1;
+        if (!b.expiry_date) return -1;
+        return new Date(a.expiry_date) - new Date(b.expiry_date);
+    });
 };
 
 /**

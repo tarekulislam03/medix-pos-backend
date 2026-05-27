@@ -57,7 +57,8 @@ const createProduct = async (req, res) => {
             storeId: req.storeId,
             medicine_name: {
                 $regex: new RegExp(`^${escapeRegExp(normalizedName)}$`, "i")
-            }
+            },
+            batch_number: batch_number || ""
         });
 
         if (product) {
@@ -441,7 +442,10 @@ const autoImportConfirm = async (req, res) => {
 
         console.log("Items received:", items);
 
-        for (const item of items) {
+        let currentShortBarcode = parseInt(await getNextShortBarcode(req.storeId), 10);
+
+        for (let i = 0; i < items.length; i++) {
+            const item = items[i];
 
             const medicineNameRaw = item.medicine_name || item.product_name;
             if (!medicineNameRaw) continue;
@@ -450,16 +454,18 @@ const autoImportConfirm = async (req, res) => {
             const normalizedName = medicineName.toUpperCase();
 
             const barcodeString =
-                `${normalizedName.replace(/\s/g, '')}-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
+                `${normalizedName.replace(/\s/g, '')}-${Date.now()}-${Math.floor(Math.random() * 100000)}-${i}`;
 
-            const shortBarcodeString = await getNextShortBarcode(req.storeId);
+            const shortBarcodeString = currentShortBarcode.toString();
+            currentShortBarcode++;
 
             const result = await Inventory.findOneAndUpdate(
                 {
                     storeId: req.storeId,
                     medicine_name: {
                         $regex: new RegExp(`^${escapeRegExp(normalizedName)}$`, "i")
-                    }
+                    },
+                    batch_number: item.batch_number || ""
                 },
                 {
                     $inc: { quantity: cleanNumber(item.quantity) },
