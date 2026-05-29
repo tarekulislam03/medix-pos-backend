@@ -45,11 +45,38 @@ const SalesSchema = new mongoose.Schema({
                 type: Number,
                 required: true,
             },
+            gst_percent: {
+                type: Number,
+                default: 0,
+            },
+            taxable_amount: {
+                type: Number,
+                default: 0,
+            },
+            cgst_amount: {
+                type: Number,
+                default: 0,
+            },
+            sgst_amount: {
+                type: Number,
+                default: 0,
+            },
+            igst_amount: {
+                type: Number,
+                default: 0,
+            },
+            hsn_code: {
+                type: String,
+                default: ""
+            }
         }
     ],
 
     subtotal: Number,
     total_discount: Number,
+    total_taxable: { type: Number, default: 0 },
+    total_cgst: { type: Number, default: 0 },
+    total_sgst: { type: Number, default: 0 },
     doctor_fee: { type: Number, default: 0 },
     otc_items: [
         {

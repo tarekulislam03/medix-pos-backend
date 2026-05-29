@@ -219,6 +219,9 @@ const updateSaleById = async (req, res) => {
         // --- BUILD NEW SALE ---
         let subtotal = 0;
         let total_discount = 0;
+        let total_taxable = 0;
+        let total_cgst = 0;
+        let total_sgst = 0;
         const saleItems = [];
 
         for (const item of items) {
@@ -255,8 +258,24 @@ const updateSaleById = async (req, res) => {
             const discountAmount = Number(((itemSubtotal * discountPercent) / 100).toFixed(2));
             const itemTotal = Number((itemSubtotal - discountAmount).toFixed(2));
 
+            // GST Calculations (assuming itemTotal is inclusive of GST)
+            const gstPercent = Number(product.gst || 0);
+            let taxableAmount = itemTotal;
+            let cgstAmount = 0;
+            let sgstAmount = 0;
+
+            if (gstPercent > 0) {
+                taxableAmount = Number((itemTotal / (1 + (gstPercent / 100))).toFixed(2));
+                const totalGst = Number((itemTotal - taxableAmount).toFixed(2));
+                cgstAmount = Number((totalGst / 2).toFixed(2));
+                sgstAmount = Number((totalGst - cgstAmount).toFixed(2));
+            }
+
             subtotal += itemSubtotal;
             total_discount += discountAmount;
+            total_taxable += taxableAmount;
+            total_cgst += cgstAmount;
+            total_sgst += sgstAmount;
 
             saleItems.push({
                 product_id: product._id,
@@ -266,7 +285,11 @@ const updateSaleById = async (req, res) => {
                 quantity: item.quantity,
                 discount_percent: discountPercent,
                 discount_amount: discountAmount,
-                total: itemTotal
+                total: itemTotal,
+                gst_percent: gstPercent,
+                taxable_amount: taxableAmount,
+                cgst_amount: cgstAmount,
+                sgst_amount: sgstAmount
             });
 
             // Deduct stock
@@ -276,6 +299,9 @@ const updateSaleById = async (req, res) => {
 
         subtotal = Number(subtotal.toFixed(2));
         total_discount = Number(total_discount.toFixed(2));
+        total_taxable = Number(total_taxable.toFixed(2));
+        total_cgst = Number(total_cgst.toFixed(2));
+        total_sgst = Number(total_sgst.toFixed(2));
 
         const medicineTotalAfterDiscount = Number((subtotal - total_discount).toFixed(2));
 
@@ -319,6 +345,9 @@ const updateSaleById = async (req, res) => {
         existingSale.items = saleItems;
         existingSale.subtotal = subtotal;
         existingSale.total_discount = total_discount;
+        existingSale.total_taxable = total_taxable;
+        existingSale.total_cgst = total_cgst;
+        existingSale.total_sgst = total_sgst;
         existingSale.doctor_fee = doctorFee;
         existingSale.otc_items = sanitizedOtcItems;
         existingSale.otc_total = otcTotal;

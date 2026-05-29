@@ -9,6 +9,8 @@ import {
     removeCacheEntry,
     loadProducts,
 } from "../services/productCacheService.js";
+import { uploadToCloudinary } from "./purchaseController.js";
+import Purchase from "../models/purchaseModel.js";
 
 const escapeRegExp = (string) => {
     return string.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -384,8 +386,13 @@ const autoImportProducts = async (req, res) => {
             });
         }
 
+        // Keep the original buffer for Cloudinary (before sharp resizes it)
+        const originalBuffer  = req.file.buffer;
+        const originalName    = req.file.originalname;
+        const originalMime    = req.file.mimetype;
+
         //Preprocess Image (rotate + resize + force format)
-        const processedBuffer = await sharp(req.file.buffer)
+        const processedBuffer = await sharp(originalBuffer)
             .rotate()               // auto-fix orientation
             .resize({ width: 1200 }) // optimize for OCR
             .png()                   // Force output to PNG format
@@ -404,10 +411,55 @@ const autoImportProducts = async (req, res) => {
             throw new Error("Invalid AI response format: missing items array");
         }
 
+        const items = parsed.items;
+        const metadata = {
+            supplier_name: parsed.supplier_name || "",
+            supplier_gstin: parsed.supplier_gstin || "",
+            invoice_no: parsed.invoice_no || "",
+            invoice_date: parsed.invoice_date || "",
+            taxable_amount: Number(parsed.taxable_amount) || 0,
+            cgst_amount: Number(parsed.cgst_amount) || 0,
+            sgst_amount: Number(parsed.sgst_amount) || 0,
+        };
+
+        // ── Fire-and-forget: upload original bill to Cloudinary + create Purchase record ──
+        // We do NOT await this — a Cloudinary failure must never block the user's import.
+        let pendingPurchaseId = null;
+        try {
+            const { secure_url, public_id } = await uploadToCloudinary(
+                originalBuffer,
+                originalName,
+                originalMime
+            );
+
+            const purchase = await Purchase.create({
+                storeId:              req.storeId,
+                bill_image_url:       secure_url,
+                cloudinary_public_id: public_id,
+                supplier_name:        metadata.supplier_name,
+                supplier_gstin:       metadata.supplier_gstin,
+                bill_no:              metadata.invoice_no,
+                bill_date:            metadata.invoice_date,
+                taxable_amount:       metadata.taxable_amount,
+                cgst_amount:          metadata.cgst_amount,
+                sgst_amount:          metadata.sgst_amount,
+                items_count:          items.length,
+                source:               "auto_import",
+                status:               "pending",   // becomes 'received' after confirm
+            });
+
+            pendingPurchaseId = purchase._id.toString();
+        } catch (cloudErr) {
+            // Non-fatal — log and continue. Purchase record creation is best-effort.
+            console.warn("[AutoImport] Cloudinary/Purchase record creation failed (non-fatal):", cloudErr.message);
+        }
+
         return res.json({
             success: true,
-            imported_products: parsed.items.length,
-            items: parsed.items
+            imported_products: items.length,
+            metadata,
+            items,
+            purchase_id: pendingPurchaseId,   // null if Cloudinary failed — frontend handles gracefully
         });
 
     } catch (error) {

@@ -76,6 +76,9 @@ const checkout = async (req, res) => {
         // Process Items
         let subtotal = 0;
         let total_discount = 0;
+        let total_taxable = 0;
+        let total_cgst = 0;
+        let total_sgst = 0;
         const saleItems = [];
 
         for (const item of items) {
@@ -111,8 +114,26 @@ const checkout = async (req, res) => {
                 (itemSubtotal - discountAmount).toFixed(2)
             );
 
+            // GST Calculations (assuming itemTotal is inclusive of GST)
+            const gstPercent = Number(product.gst || 0);
+            let taxableAmount = itemTotal;
+            let cgstAmount = 0;
+            let sgstAmount = 0;
+
+            if (gstPercent > 0) {
+                taxableAmount = Number((itemTotal / (1 + (gstPercent / 100))).toFixed(2));
+                const totalGst = Number((itemTotal - taxableAmount).toFixed(2));
+                // Assuming intra-state retail. For inter-state, it would be IGST instead.
+                cgstAmount = Number((totalGst / 2).toFixed(2));
+                sgstAmount = Number((totalGst - cgstAmount).toFixed(2));
+            }
+
             subtotal += itemSubtotal;
             total_discount += discountAmount;
+            total_taxable += taxableAmount;
+            total_cgst += cgstAmount;
+            total_sgst += sgstAmount;
+            const igstAmount = 0; // Defaulting to 0 for standard intra-state POS
 
             saleItems.push({
                 product_id: product._id,
@@ -122,7 +143,13 @@ const checkout = async (req, res) => {
                 quantity: item.quantity,
                 discount_percent: discountPercent,
                 discount_amount: discountAmount,
-                total: itemTotal
+                total: itemTotal,
+                gst_percent: gstPercent,
+                taxable_amount: taxableAmount,
+                cgst_amount: cgstAmount,
+                sgst_amount: sgstAmount,
+                igst_amount: igstAmount,
+                hsn_code: product.hsn_code || ""
             });
 
             // Deduct stock
@@ -132,6 +159,9 @@ const checkout = async (req, res) => {
 
         subtotal = Number(subtotal.toFixed(2));
         total_discount = Number(total_discount.toFixed(2));
+        total_taxable = Number(total_taxable.toFixed(2));
+        total_cgst = Number(total_cgst.toFixed(2));
+        total_sgst = Number(total_sgst.toFixed(2));
 
         const medicineTotalAfterDiscount = Number((subtotal - total_discount).toFixed(2));
 
@@ -180,6 +210,9 @@ const checkout = async (req, res) => {
             items: saleItems,
             subtotal,
             total_discount,
+            total_taxable,
+            total_cgst,
+            total_sgst,
             doctor_fee: doctorFee,
             otc_items: sanitizedOtcItems,
             otc_total: otcTotal,
