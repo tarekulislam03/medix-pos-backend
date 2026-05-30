@@ -55,7 +55,7 @@ const checkout = async (req, res) => {
                 });
             }
 
-            previousCredit = Number(customer.credit_balance || 0);
+            previousCredit = Number(customer.credit_balance ?? 0);
         }
 
         // Cannot pay more previous due than exists
@@ -84,19 +84,21 @@ const checkout = async (req, res) => {
         for (const item of items) {
             const product = await Inventory.findOne({ _id: item.product_id, storeId: req.storeId });
 
+            // Basic Validation for each item
             if (!product) {
                 return res.status(404).json({
                     message: "Product not found"
                 });
             }
 
+            // Stock aviailability check
             if (product.quantity < item.quantity) {
                 return res.status(400).json({
                     message: `Insufficient stock for ${product.medicine_name}`
                 });
             }
 
-            const discountPercent = Number(item.discount_percent || 0);
+            const discountPercent = Number(item.discount_percent ?? 0);
 
             if (discountPercent < 0 || discountPercent > 100) {
                 return res.status(400).json({
@@ -114,25 +116,32 @@ const checkout = async (req, res) => {
                 (itemSubtotal - discountAmount).toFixed(2)
             );
 
-            // GST Calculations (assuming itemTotal is inclusive of GST)
-            const gstPercent = Number(product.gst || 0);
-            let taxableAmount = itemTotal;
+            // GST Calculations
+            const gstPercent = Number(product.gst ?? 0);
+            let taxableAmount = itemTotal; // when GST is 0
             let cgstAmount = 0;
             let sgstAmount = 0;
 
+            // Validation
+            if (gstPercent < 0 || gstPercent > 28) {
+                return res.status(400).json({
+                    message: "Invalid GST percentage"
+                });
+            }
+
+            // Calculation
             if (gstPercent > 0) {
-                taxableAmount = Number((itemTotal / (1 + (gstPercent / 100))).toFixed(2));
-                const totalGst = Number((itemTotal - taxableAmount).toFixed(2));
-                // Assuming intra-state retail. For inter-state, it would be IGST instead.
+                const totalGst = Number(((itemTotal * gstPercent) / (100 + gstPercent)).toFixed(2));
+                taxableAmount = Number((itemTotal - totalGst).toFixed(2));
                 cgstAmount = Number((totalGst / 2).toFixed(2));
                 sgstAmount = Number((totalGst - cgstAmount).toFixed(2));
             }
 
-            subtotal += itemSubtotal;
-            total_discount += discountAmount;
-            total_taxable += taxableAmount;
-            total_cgst += cgstAmount;
-            total_sgst += sgstAmount;
+            subtotal = subtotal + itemSubtotal;
+            total_discount = total_discount + discountAmount;
+            total_taxable = total_taxable + taxableAmount;
+            total_cgst = total_cgst + cgstAmount;
+            total_sgst = total_sgst + sgstAmount;
             const igstAmount = 0; // Defaulting to 0 for standard intra-state POS
 
             saleItems.push({
@@ -166,7 +175,7 @@ const checkout = async (req, res) => {
         const medicineTotalAfterDiscount = Number((subtotal - total_discount).toFixed(2));
 
         // Doctor fee — not discounted
-        const doctorFee = Number(Number(doctor_fee || 0).toFixed(2));
+        const doctorFee = Number(Number(doctor_fee ?? 0).toFixed(2));
         if (isNaN(doctorFee) || doctorFee < 0) {
             return res.status(400).json({ message: "Invalid doctor fee" });
         }
@@ -176,7 +185,7 @@ const checkout = async (req, res) => {
         let otcTotal = 0;
         const sanitizedOtcItems = [];
         for (const otcItem of otcList) {
-            const price = Number(otcItem.price || 0);
+            const price = Number(otcItem.price ?? 0);
             if (!otcItem.name || isNaN(price) || price < 0) {
                 return res.status(400).json({ message: `Invalid OTC item: ${otcItem.name || 'unknown'}` });
             }
@@ -187,11 +196,10 @@ const checkout = async (req, res) => {
 
         const grandTotal = Number((medicineTotalAfterDiscount + doctorFee + otcTotal).toFixed(2));
 
-        // Final Financial Calculations
-        const remainingForBill = paidAmount - previousDuePayment;
+        const remainingForBill = grandTotal - paidAmount;
 
         let dueAmount = Number(
-            (grandTotal - remainingForBill).toFixed(2)
+            (remainingForBill + previousDuePayment).toFixed(2)
         );
 
         // Prevent negative due
@@ -229,12 +237,10 @@ const checkout = async (req, res) => {
         if (customer) {
             // Remove paid previous due
             customer.credit_balance -= previousDuePayment;
-
-            // Add new due if exists
+            // Add new due
             if (dueAmount > 0) {
                 customer.credit_balance += dueAmount;
             }
-
             // Prevent negative balance edge case
             if (customer.credit_balance < 0) {
                 customer.credit_balance = 0;
