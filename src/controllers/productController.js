@@ -89,7 +89,7 @@ const createProduct = async (req, res) => {
         } else {
 
             const barcodeString =
-                `${normalizedName.replace(/\s/g,'')}-${Date.now()}-${Math.floor(Math.random()*1000)}`;
+                `${normalizedName.replace(/\s/g, '')}-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
 
             const shortBarcodeString = await getNextShortBarcode(req.storeId);
 
@@ -387,9 +387,9 @@ const autoImportProducts = async (req, res) => {
         }
 
         // Keep the original buffer for Cloudinary (before sharp resizes it)
-        const originalBuffer  = req.file.buffer;
-        const originalName    = req.file.originalname;
-        const originalMime    = req.file.mimetype;
+        const originalBuffer = req.file.buffer;
+        const originalName = req.file.originalname;
+        const originalMime = req.file.mimetype;
 
         //Preprocess Image (rotate + resize + force format)
         const processedBuffer = await sharp(originalBuffer)
@@ -412,6 +412,7 @@ const autoImportProducts = async (req, res) => {
         }
 
         const items = parsed.items;
+
         const metadata = {
             supplier_name: parsed.supplier_name || "",
             supplier_gstin: parsed.supplier_gstin || "",
@@ -433,20 +434,21 @@ const autoImportProducts = async (req, res) => {
             );
 
             const purchase = await Purchase.create({
-                storeId:              req.storeId,
-                bill_image_url:       secure_url,
+                storeId: req.storeId,
+                bill_image_url: secure_url,
                 cloudinary_public_id: public_id,
-                supplier_name:        metadata.supplier_name,
-                supplier_gstin:       metadata.supplier_gstin,
-                bill_no:              metadata.invoice_no,
-                bill_date:            metadata.invoice_date,
-                taxable_amount:       metadata.taxable_amount,
-                cgst_amount:          metadata.cgst_amount,
-                sgst_amount:          metadata.sgst_amount,
-                items_count:          items.length,
-                source:               "auto_import",
-                status:               "pending",   // becomes 'received' after confirm
+                supplier_name: metadata.supplier_name,
+                supplier_gstin: metadata.supplier_gstin,
+                bill_no: metadata.invoice_no,
+                bill_date: metadata.invoice_date,
+                taxable_amount: metadata.taxable_amount,
+                cgst_amount: metadata.cgst_amount,
+                sgst_amount: metadata.sgst_amount,
+                items_count: items.length,
+                source: "auto_import",
+                status: "pending",   // becomes 'received' after confirm
             });
+
 
             pendingPurchaseId = purchase._id.toString();
         } catch (cloudErr) {

@@ -5,6 +5,7 @@ export const callVisionModel = async (base64Image) => {
     "https://openrouter.ai/api/v1/chat/completions",
     {
       model: "google/gemini-2.0-flash-001",
+      response_format: { type: "json_object" },
       max_tokens: 4096,
       temperature: 0,
       messages: [
@@ -14,50 +15,18 @@ export const callVisionModel = async (base64Image) => {
             {
               type: "text",
               text: `
-Extract all the required information from the pharmacy bill.
-
-Fields required:
-- medicine_name
-- mrp
-- quantity
-- expiry_date
-- cost_price ("RATE" in bills)
-- batch_number ("BATCH", "BATCH NO", "B. NO" etc.)
-- hsn_code ("HSN", "HSN CODE" etc.)
-- gst (percentage number, e.g., 5, 12, 18, or 28, representing "GST", "TAX", "GST RATE" etc.)
-
-Also extract the following top-level invoice metadata from the bill:
-- supplier_name (The distributor/agency issuing the bill, e.g. "S B HEALTHCARE")
-- supplier_gstin (The GSTIN of the supplier)
-- invoice_no (The bill/invoice number)
-- invoice_date (The date of the invoice in YYYY-MM-DD format)
-- taxable_amount (The total taxable value or sub-total before taxes)
-- cgst_amount (The total CGST amount charged in the bill)
-- sgst_amount (The total SGST amount charged in the bill)
-
-Rules:
-- Return ONLY valid JSON
-- Do NOT explain
-- Do NOT add markdown
-- If expiry_date, batch_number, hsn_code, or gst is not found, return null or default values
-- Supplier Name rule (IMPORTANT):
-  * The "supplier_name" should be the name of the distributor or agency ISSUING the bill (usually printed at the top, e.g., "S B HEALTHCARE"). Do NOT use the manufacturer or company name from the individual item rows (e.g., do not use the "Comp" column like "SUN").
-- MRP column rule (IMPORTANT):
-  * If the bill has TWO MRP columns — one labeled "Old MRP", "O.MRP", "O. MRP", or similar, AND another labeled "New MRP", "N.MRP", "N. MRP", or similar — use ONLY the NEW MRP value as the "mrp" field.
-  * If the bill has only ONE MRP column (regardless of label), use that value as the "mrp" field.
-- GST column rule (IMPORTANT):
-  * If a combined "GST" column is not explicitly available, but separate "CGST" and "SGST" columns exist or check for CGST+SGST column, add their percentage values together to determine the final "gst" (e.g., if CGST is 6% and SGST is 6%, gst is 12).
-
-Format:
+Extract pharmacy invoice data and return ONLY valid JSON in this format:
 
 {
-  "supplier_name": "",
-  "supplier_gstin": "",
-  "invoice_no": "",
-  "invoice_date": "",
-  "taxable_amount": 0,
-  "cgst_amount": 0,
-  "sgst_amount": 0,
+  "supplier_name":"",
+  "supplier_gstin":"",
+  "invoice_no":"",
+  "invoice_date":"",
+  "subtotal":0,
+  "total_discount":0,
+  "taxable_amount":0,
+  "cgst_amount":0,
+  "sgst_amount":0,
   "items":[
     {
       "medicine_name":"",
@@ -71,6 +40,32 @@ Format:
     }
   ]
 }
+
+Rules:
+
+- supplier_name = distributor/agency issuing the bill (header). Never use manufacturer/company from item rows.
+- invoice_date must be YYYY-MM-DD.
+- Quantity is always written as Qty. in table rows. mostly 2nd row
+- cost_price = Rate / Net Rate / Purchase Rate.
+- batch_number = Batch / Batch No / B. No.
+- expiry_date = Exp / Expiry.
+- hsn_code = HSN / HSN Code.
+- If Old MRP and New MRP both exist, use New MRP.
+- gst = GST column value. If GST is not present, use CGST% + SGST%.
+
+Tax rules:
+
+- cgst_amount = total CGST amount on invoice.
+- sgst_amount = total SGST amount on invoice.
+
+- taxable_amount priority:
+  1. use subtotal - total_discount if subtotal and total_discount are present.
+
+- Never derive taxable_amount from rounded Grand Total if a direct taxable value exists.
+- Return all medicine rows.
+- Missing values = null.
+- Numbers must be numbers, not strings.
+- Return ONLY JSON.
 `
             },
             {
