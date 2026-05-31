@@ -3,6 +3,7 @@ import mongoose from "mongoose";
 import Inventory from "../models/productModel.js";
 import Customer from "../models/customerModel.js";
 
+// get todays sales total
 const todaySales = async (req, res) => {
     try {
 
@@ -43,6 +44,7 @@ const todaySales = async (req, res) => {
     }
 };
 
+// get monthly sales total
 const monthlySales = async (req, res) => {
     try {
 
@@ -86,6 +88,7 @@ const monthlySales = async (req, res) => {
     }
 }
 
+// get sales history
 const getSalesHistory = async (req, res) => {
     try {
         const { page = 1, limit = 20, startDate, endDate } = req.query;

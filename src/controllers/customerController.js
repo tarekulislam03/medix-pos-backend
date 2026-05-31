@@ -14,7 +14,7 @@ const createCustomer = async (req, res) => {
             });
         }
 
-        // Optional: prevent duplicate phone numbers
+        // prevent duplicate phone numbers
         const existing = await Customer.findOne({ phone_no, storeId: req.storeId });
         if (existing) {
             return res.status(400).json({
@@ -40,7 +40,6 @@ const createCustomer = async (req, res) => {
     }
 };
 
-
 // get all customer
 const getAllCustomers = async (req, res) => {
     try {
@@ -56,7 +55,6 @@ const getAllCustomers = async (req, res) => {
         });
     }
 };
-
 
 // get customer by id
 const getCustomerById = async (req, res) => {
@@ -82,8 +80,7 @@ const getCustomerById = async (req, res) => {
     }
 };
 
-
-// update customer
+// update customer info by id
 const updateCustomer = async (req, res) => {
     try {
         const { id } = req.params;
@@ -114,7 +111,6 @@ const updateCustomer = async (req, res) => {
     }
 };
 
-
 // delete customer
 const deleteCustomer = async (req, res) => {
     try {
@@ -138,7 +134,6 @@ const deleteCustomer = async (req, res) => {
         });
     }
 };
-
 
 // search customer by name
 const searchCustomer = async (req, res) => {
@@ -184,7 +179,9 @@ const getCustomerLastPurchase = async (req, res) => {
             .lean();
 
         if (!lastSale) {
-            return res.status(200).json({ data: null });
+            return res.status(200).json({ 
+                message: "No last purchase found for this customer", 
+                data: null });
         }
 
         return res.status(200).json({
@@ -197,7 +194,7 @@ const getCustomerLastPurchase = async (req, res) => {
     }
 };
 
-
+// get customer credit balance
 const getCustomerCredit = async (req, res) => {
     try {
         const { id } = req.params;
@@ -228,6 +225,7 @@ const getCustomerCredit = async (req, res) => {
     }
 };
 
+// pay customer due
 const payCustomerDue = async (req, res) => {
     try {
         const { id } = req.params;

@@ -43,4 +43,4 @@ const xssMiddleware = (req, res, next) => {
   next();
 };
 
-export default xssMiddleware;  // ✅ default export
+export default xssMiddleware;  
