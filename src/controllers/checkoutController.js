@@ -142,7 +142,7 @@ const checkout = async (req, res) => {
             total_taxable = total_taxable + taxableAmount;
             total_cgst = total_cgst + cgstAmount;
             total_sgst = total_sgst + sgstAmount;
-            const igstAmount = 0; // Defaulting to 0 for standard intra-state POS
+            const igstAmount = 0;
 
             saleItems.push({
                 product_id: product._id,

@@ -1,13 +1,11 @@
 import sharp from "sharp";
-import { Readable } from "stream";
+import heicConvert from "heic-convert";
+import path from "path";
 
-/**
- * Middleware to normalize uploaded images.
- * Specifically handles HEIC images by converting them to JPEG (quality 90).
- * Replaces the original buffer with the converted output.
- * Uses streaming to handle large files safely and avoid memory spikes.
- */
-export const normalizeImage = async (req, res, next) => {
+
+const normalizeImage = async (req, res, next) => {
+
+    // If no file or buffer in req, it'll skip normalization
     if (!req.file || !req.file.buffer) {
         return next();
     }
@@ -15,44 +13,47 @@ export const normalizeImage = async (req, res, next) => {
     const { mimetype, originalname } = req.file;
 
     try {
-        console.log(`[Backend] Processing normalization for: ${originalname} (${mimetype})`);
-        
-        // Use streaming to avoid memory spikes with large buffers
-        const bufferStream = new Readable();
-        bufferStream.push(req.file.buffer);
-        bufferStream.push(null);
 
-        // Standardize to JPEG with auto-rotation (EXIF orientation fix)
-        // This handles HEIC to JPEG conversion automatically if sharp has heif support.
-        const transformer = sharp({ failOn: 'none' })
+        let buffer = req.file.buffer;
+
+        // validate heic
+        const ext = originalname.split('.').pop()?.toLowerCase();
+        const isHeic =
+            ["image/heic", "image/heif"].includes(mimetype) || ["heic", "heif"].includes(ext);
+
+        if (isHeic) {
+            // convert heic to jpeg
+            buffer = await heicConvert({
+                buffer,
+                format: "JPEG",
+                quality: 0.9,
+            })
+        };
+
+        // rotate and resize
+        buffer = await sharp(buffer)
             .rotate()
-            .jpeg({ 
-                quality: 90,
-                chromaSubsampling: '4:4:4' 
-            });
-
-        const convertedBuffer = await bufferStream
-            .pipe(transformer)
+            .resize({
+                width: 1000,
+                withoutEnlargement: true
+            })
+            .jpeg({ quality: 90 })
             .toBuffer();
 
         // Standardize metadata
-        req.file.buffer = convertedBuffer;
+        req.file.buffer = buffer;
         req.file.mimetype = "image/jpeg";
-        req.file.size = convertedBuffer.length;
+        req.file.size = buffer.length;
 
         // Standard extension
-        const lowerName = originalname.toLowerCase();
-        if (!lowerName.endsWith(".jpg") && !lowerName.endsWith(".jpeg")) {
-            const lastDot = originalname.lastIndexOf('.');
-            const baseName = lastDot !== -1 ? originalname.substring(0, lastDot) : originalname;
-            req.file.originalname = baseName + ".jpg";
-        }
+        const baseName = path.parse(originalname).name;
+        req.file.originalname = `${baseName}.jpg`;
 
-        console.log(`[Backend] Normalization successful for ${req.file.originalname} (${req.file.size} bytes)`);
-        next();
+        return next();
+
     } catch (error) {
-        console.error("[Backend] CRITICAL: Image Normalization Failed:", error);
-        
+        console.error("Image Normalization Failed:", error);
+
         return res.status(400).json({
             success: false,
             message: `Image normalization failed: ${error.message}. Please try a different photo or a standard format (JPEG, PNG).`,
@@ -60,3 +61,5 @@ export const normalizeImage = async (req, res, next) => {
         });
     }
 };
+
+export { normalizeImage };
