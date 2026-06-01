@@ -4,17 +4,19 @@ import PDFDocument from 'pdfkit';
 import bwipjs from 'bwip-js';
 
 
-// Single product barcode image gen
-export const getSingleBarcode = async (req, res) => {
+// Single product barcode
+const getSingleBarcode = async (req, res) => {
     try {
         const { id } = req.params;
 
         const product = await Inventory.findOne({ _id: id, storeId: req.storeId });
+
+        // basic validation
         if (!product) {
             return res.status(404).json({ message: "Product not found" });
         }
 
-        // 58mm width ≈ 164 points
+        // configure pdf doc
         const doc = new PDFDocument({
             size: [164, 250],  // width, height in points
             margin: 10
@@ -68,19 +70,20 @@ export const getSingleBarcode = async (req, res) => {
 };
 
 // Bulk barcode label pdf gen
-export const generateLabels = async (req, res) => {
+const generateLabels = async (req, res) => {
     try {
         const { items } = req.body;
 
+        // basic validation
         if (!items || !Array.isArray(items) || items.length === 0) {
             return res.status(400).json({
                 message: "Items required"
             });
         }
 
-        // 58mm thermal width
+        // configure doc
         const doc = new PDFDocument({
-            size: [164, 2000],
+            size: [164, 2000], // height and width in points
             margin: 8
         });
 
@@ -150,3 +153,5 @@ export const generateLabels = async (req, res) => {
         });
     }
 };
+
+export { getSingleBarcode, generateLabels };
