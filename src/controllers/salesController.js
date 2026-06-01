@@ -136,6 +136,7 @@ const getSalesHistory = async (req, res) => {
     }
 };
 
+// get sale details by id
 const getSaleById = async (req, res) => {
     try {
         const { id } = req.params;
@@ -152,6 +153,7 @@ const getSaleById = async (req, res) => {
     }
 };
 
+// update sale by id
 const updateSaleById = async (req, res) => {
     try {
         const { id } = req.params;
