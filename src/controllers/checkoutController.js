@@ -76,6 +76,7 @@ const checkout = async (req, res) => {
         // Process Items
         let subtotal = 0;
         let total_discount = 0;
+        let total_profit = 0;
         let total_taxable = 0;
         let total_cgst = 0;
         let total_sgst = 0;
@@ -139,6 +140,11 @@ const checkout = async (req, res) => {
 
             subtotal = subtotal + itemSubtotal;
             total_discount = total_discount + discountAmount;
+            
+            const itemCostPrice = Number(product.cost_price || product.mrp || 0);
+            const itemProfit = itemTotal - (itemCostPrice * item.quantity);
+            total_profit += itemProfit;
+            
             total_taxable = total_taxable + taxableAmount;
             total_cgst = total_cgst + cgstAmount;
             total_sgst = total_sgst + sgstAmount;
@@ -149,6 +155,7 @@ const checkout = async (req, res) => {
                 medicine_name: product.medicine_name,
                 barcode: product.barcode,
                 mrp: product.mrp,
+                cost_price: itemCostPrice,
                 quantity: item.quantity,
                 discount_percent: discountPercent,
                 discount_amount: discountAmount,
@@ -218,6 +225,7 @@ const checkout = async (req, res) => {
             items: saleItems,
             subtotal,
             total_discount,
+            total_profit: Number(total_profit.toFixed(2)),
             total_taxable,
             total_cgst,
             total_sgst,

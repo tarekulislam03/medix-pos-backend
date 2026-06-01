@@ -29,6 +29,10 @@ const SalesSchema = new mongoose.Schema({
                 type: Number,
                 required: true,
             },
+            cost_price: {
+                type: Number,
+                default: 0,
+            },
             quantity: {
                 type: Number,
                 required: true,
@@ -74,6 +78,7 @@ const SalesSchema = new mongoose.Schema({
 
     subtotal: Number,
     total_discount: Number,
+    total_profit: { type: Number, default: 0 },
     total_taxable: { type: Number, default: 0 },
     total_cgst: { type: Number, default: 0 },
     total_sgst: { type: Number, default: 0 },

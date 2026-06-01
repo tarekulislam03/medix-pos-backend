@@ -70,7 +70,8 @@ const monthlySales = async (req, res) => {
             {
                 $group: {
                     _id: null,
-                    total_sales: { $sum: "$grand_total" }
+                    total_sales: { $sum: "$grand_total" },
+                    total_profit: { $sum: "$total_profit" }
                 }
             }
         ]);
@@ -78,6 +79,7 @@ const monthlySales = async (req, res) => {
         return res.status(200).json({
             data: result[0] || {
                 total_sales: 0,
+                total_profit: 0
             }
         });
 
@@ -201,8 +203,8 @@ const updateSaleById = async (req, res) => {
             }
         }
 
-        // --- REVERT OLD SALE ---
-        // 1. Revert Inventory for old items
+        
+        // Revert Inventory for old items
         for (const oldItem of existingSale.items) {
             const product = await Inventory.findOne({ _id: oldItem.product_id, storeId: req.storeId });
             if (product) {
@@ -211,7 +213,7 @@ const updateSaleById = async (req, res) => {
             }
         }
 
-        // 2. Revert Customer Credit Balance
+        // Revert Customer Credit Balance
         if (existingSale.customer) {
             const oldCustomer = await Customer.findOne({ _id: existingSale.customer, storeId: req.storeId });
             if (oldCustomer && existingSale.due_amount > 0) {
@@ -221,9 +223,10 @@ const updateSaleById = async (req, res) => {
             }
         }
 
-        // --- BUILD NEW SALE ---
+        // creating new sales
         let subtotal = 0;
         let total_discount = 0;
+        let total_profit = 0;
         let total_taxable = 0;
         let total_cgst = 0;
         let total_sgst = 0;
@@ -233,7 +236,7 @@ const updateSaleById = async (req, res) => {
             const product = await Inventory.findOne({ _id: item.product_id, storeId: req.storeId });
 
             if (!product) {
-                // Return stock since we modified it above
+                
                 for (const oldItem of existingSale.items) {
                     const prod = await Inventory.findOne({ _id: oldItem.product_id, storeId: req.storeId });
                     if (prod) { prod.quantity -= oldItem.quantity; await prod.save(); }
@@ -263,30 +266,44 @@ const updateSaleById = async (req, res) => {
             const discountAmount = Number(((itemSubtotal * discountPercent) / 100).toFixed(2));
             const itemTotal = Number((itemSubtotal - discountAmount).toFixed(2));
 
-            // GST Calculations (assuming itemTotal is inclusive of GST)
-            const gstPercent = Number(product.gst || 0);
-            let taxableAmount = itemTotal;
+            // GSt calculation
+            const gstPercent = Number(product.gst ?? 0);
+            let taxableAmount = itemTotal; // when gst is 0
             let cgstAmount = 0;
             let sgstAmount = 0;
 
+            // validations
+            if (gstPercent < 0 || gstPercent > 28) {
+                return res.status(400).json({
+                    message: "Invalid GST percentage"
+                });
+            }
+
+            // Calculation
             if (gstPercent > 0) {
-                taxableAmount = Number((itemTotal / (1 + (gstPercent / 100))).toFixed(2));
-                const totalGst = Number((itemTotal - taxableAmount).toFixed(2));
+                const totalGst = Number(((itemTotal * gstPercent) / (100 + gstPercent)).toFixed(2));
+                taxableAmount = Number((itemTotal - totalGst).toFixed(2));
                 cgstAmount = Number((totalGst / 2).toFixed(2));
                 sgstAmount = Number((totalGst - cgstAmount).toFixed(2));
             }
 
-            subtotal += itemSubtotal;
-            total_discount += discountAmount;
-            total_taxable += taxableAmount;
-            total_cgst += cgstAmount;
-            total_sgst += sgstAmount;
+            subtotal = subtotal + itemSubtotal;
+            total_discount = total_discount + discountAmount;
+            
+            const itemCostPrice = Number(product.cost_price || product.mrp || 0);
+            const itemProfit = itemTotal - (itemCostPrice * item.quantity);
+            total_profit += itemProfit;
+            
+            total_taxable = total_taxable + taxableAmount;
+            total_cgst = total_cgst + cgstAmount;
+            total_sgst = total_sgst + sgstAmount;
 
             saleItems.push({
                 product_id: product._id,
                 medicine_name: product.medicine_name,
                 barcode: product.barcode,
                 mrp: product.mrp,
+                cost_price: itemCostPrice,
                 quantity: item.quantity,
                 discount_percent: discountPercent,
                 discount_amount: discountAmount,
@@ -350,6 +367,7 @@ const updateSaleById = async (req, res) => {
         existingSale.items = saleItems;
         existingSale.subtotal = subtotal;
         existingSale.total_discount = total_discount;
+        existingSale.total_profit = Number(total_profit.toFixed(2));
         existingSale.total_taxable = total_taxable;
         existingSale.total_cgst = total_cgst;
         existingSale.total_sgst = total_sgst;
@@ -386,6 +404,31 @@ const updateSaleById = async (req, res) => {
     }
 };
 
+// search sale by invoice number
+const searchSaleByInvoice = async (req, res) => {
+    try {
+        const { q } = req.query;
+        if (!q || !q.trim()) {
+            return res.status(400).json({ success: false, message: "Search query is required" });
+        }
+
+        const escapedQuery = q.trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        const sales = await Sales.find({
+            storeId: req.storeId,
+            invoice_number: { $regex: escapedQuery, $options: 'i' }
+        })
+            .populate("customer")
+            .sort({ created_at: -1 })
+            .limit(10);
+
+        return res.status(200).json({ success: true, data: sales });
+    } catch (error) {
+        console.error(error);
+        res.status(500).json({ success: false, message: "Failed to search invoices" });
+    }
+};
+
+// delete sales by id
 const deleteSaleById = async (req, res) => {
     try {
         const { id } = req.params;
@@ -395,7 +438,7 @@ const deleteSaleById = async (req, res) => {
             return res.status(404).json({ success: false, message: "Sale not found" });
         }
 
-        // 1. Revert Inventory — restore stock for each item sold
+        // restore stock for each item sold
         for (const item of sale.items) {
             const product = await Inventory.findOne({ _id: item.product_id, storeId: req.storeId });
             if (product) {
@@ -404,7 +447,7 @@ const deleteSaleById = async (req, res) => {
             }
         }
 
-        // 2. Revert Customer Credit Balance
+        // Revert Customer Credit Balance
         if (sale.customer && sale.due_amount > 0) {
             const customer = await Customer.findOne({ _id: sale.customer, storeId: req.storeId });
             if (customer) {
@@ -414,7 +457,7 @@ const deleteSaleById = async (req, res) => {
             }
         }
 
-        // 3. Delete the sale document
+        // Delete the sale document
         await Sales.deleteOne({ _id: id, storeId: req.storeId });
 
         return res.status(200).json({
@@ -428,4 +471,4 @@ const deleteSaleById = async (req, res) => {
     }
 };
 
-export { todaySales, monthlySales, getSalesHistory, getSaleById, updateSaleById, deleteSaleById };
+export { todaySales, monthlySales, getSalesHistory, getSaleById, updateSaleById, deleteSaleById, searchSaleByInvoice };
