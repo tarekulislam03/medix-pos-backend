@@ -45,9 +45,11 @@ const normalizeImage = async (req, res, next) => {
         req.file.mimetype = "image/jpeg";
         req.file.size = buffer.length;
 
+        console.log(`Image normalized: ${originalname} (${buffer.length / 1024 } kb)`);
+
         // Standard extension
         const baseName = path.parse(originalname).name;
-        req.file.originalname = `${baseName}.jpg`;
+        req.file.originalname = `${baseName}.jpg`;``
 
         return next();
 
