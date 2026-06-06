@@ -12,7 +12,7 @@ const allowedOrigins = [
   'http://localhost:8081',
   'http://localhost:5173',
   'http://localhost:3000',
-  'https://medix-pos.vercel.app', 
+  'https://usemedix.online', 
   'http://localhost:63518',
 ];
 
@@ -41,7 +41,6 @@ app.use(cookieParser());
 
 // 5. Sanitize
 app.use(xssMiddleware);
-
 
 import userRouter from "./routes/userRoutes.js";
 import productRouter from "./routes/productRoutes.js";
