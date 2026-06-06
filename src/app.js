@@ -13,6 +13,7 @@ const allowedOrigins = [
   'http://localhost:5173',
   'http://localhost:3000',
   'https://www.usemedix.online', 
+  'https://usemedix.online',
   'http://localhost:63518',
 ];
 
