@@ -4,6 +4,7 @@ import Customer from "../models/customerModel.js";
 
 const checkout = async (req, res) => {
     try {
+        console.time("checkout-total");
         const {
             customer_id,
             items,
@@ -80,10 +81,24 @@ const checkout = async (req, res) => {
         let total_taxable = 0;
         let total_cgst = 0;
         let total_sgst = 0;
+        const stockOperations = [];
         const saleItems = [];
 
+        console.time("stock-update");
+
+        const productIds = items.map(item => item.product_id);
+
+        const products = await Inventory.find({
+            _id: { $in: productIds },
+            storeId: req.storeId
+        });
+
+        const productMap = new Map(
+            products.map(p => [String(p._id), p])
+        );
+
         for (const item of items) {
-            const product = await Inventory.findOne({ _id: item.product_id, storeId: req.storeId });
+            const product = productMap.get(String(item.product_id));
 
             // Basic Validation for each item
             if (!product) {
@@ -140,11 +155,11 @@ const checkout = async (req, res) => {
 
             subtotal = subtotal + itemSubtotal;
             total_discount = total_discount + discountAmount;
-            
+
             const itemCostPrice = Number(product.cost_price || product.mrp || 0);
             const itemProfit = itemTotal - (itemCostPrice * item.quantity);
             total_profit += itemProfit;
-            
+
             total_taxable = total_taxable + taxableAmount;
             total_cgst = total_cgst + cgstAmount;
             total_sgst = total_sgst + sgstAmount;
@@ -169,10 +184,24 @@ const checkout = async (req, res) => {
             });
 
             // Deduct stock
-            product.quantity -= item.quantity;
-            await product.save();
+            stockOperations.push({
+                updateOne: {
+                    filter: {
+                        _id: product._id,
+                        storeId: req.storeId
+                    },
+                    update: {
+                        $inc: {
+                            quantity: -item.quantity
+                        }
+                    }
+                }
+            });
         }
+        await Inventory.bulkWrite(stockOperations);
+        console.timeEnd("stock-update");
 
+        console.time("ledger");
         subtotal = Number(subtotal.toFixed(2));
         total_discount = Number(total_discount.toFixed(2));
         total_taxable = Number(total_taxable.toFixed(2));
@@ -215,8 +244,10 @@ const checkout = async (req, res) => {
         }
 
         const invoiceNumber = `INV-${Date.now()}`;
+        console.timeEnd("ledger");
 
         // Create Sale
+        console.time("invoice");
         const sale = await Sales.create({
             invoice_number: invoiceNumber,
             customer: customer ? customer._id : null,
@@ -239,9 +270,10 @@ const checkout = async (req, res) => {
             payment_method,
             storeId: req.storeId
         });
-
+        console.timeEnd("invoice");
 
         // Update Customer Credit
+        console.time("customer");
         if (customer) {
             // Remove paid previous due
             customer.credit_balance -= previousDuePayment;
@@ -256,6 +288,8 @@ const checkout = async (req, res) => {
 
             await customer.save();
         }
+        console.timeEnd("customer");
+        console.timeEnd("checkout-total");
 
         return res.status(200).json({
             message:
