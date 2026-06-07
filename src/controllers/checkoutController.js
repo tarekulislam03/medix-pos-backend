@@ -4,7 +4,6 @@ import Customer from "../models/customerModel.js";
 
 const checkout = async (req, res) => {
     try {
-        console.time("checkout-total");
         const {
             customer_id,
             items,
@@ -84,16 +83,12 @@ const checkout = async (req, res) => {
         const stockOperations = [];
         const saleItems = [];
 
-        console.time("stock-update");
-
         const productIds = items.map(item => item.product_id);
 
-        console.time('inventory-find');
         const products = await Inventory.find({
             _id: { $in: productIds },
             storeId: req.storeId
         }).lean();
-        console.timeEnd('inventory-find');
 
         const productMap = new Map(
             products.map(p => [String(p._id), p])
@@ -201,13 +196,8 @@ const checkout = async (req, res) => {
                 }
             });
         }
-        console.time("stock-bulkWrite");
         await Inventory.bulkWrite(stockOperations);
-        console.timeEnd("stock-bulkWrite");
 
-        console.timeEnd("stock-update");
-
-        console.time("ledger");
         subtotal = Number(subtotal.toFixed(2));
         total_discount = Number(total_discount.toFixed(2));
         total_taxable = Number(total_taxable.toFixed(2));
@@ -250,10 +240,8 @@ const checkout = async (req, res) => {
         }
 
         const invoiceNumber = `INV-${Date.now()}`;
-        console.timeEnd("ledger");
 
         // Create Sale
-        console.time("invoice");
         const sale = await Sales.create({
             invoice_number: invoiceNumber,
             customer: customer ? customer._id : null,
@@ -276,10 +264,8 @@ const checkout = async (req, res) => {
             payment_method,
             storeId: req.storeId
         });
-        console.timeEnd("invoice");
 
         // Update Customer Credit
-        console.time("customer");
         if (customer) {
             // Remove paid previous due
             customer.credit_balance -= previousDuePayment;
@@ -294,8 +280,6 @@ const checkout = async (req, res) => {
 
             await customer.save();
         }
-        console.timeEnd("customer");
-        console.timeEnd("checkout-total");
 
         return res.status(200).json({
             message:
