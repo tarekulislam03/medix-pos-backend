@@ -88,16 +88,19 @@ const checkout = async (req, res) => {
 
         const productIds = items.map(item => item.product_id);
 
+        console.time('inventory-find');
         const products = await Inventory.find({
             _id: { $in: productIds },
             storeId: req.storeId
         });
+        console.timeEnd('inventory-find');
 
         const productMap = new Map(
             products.map(p => [String(p._id), p])
         );
 
         for (const item of items) {
+
             const product = productMap.get(String(item.product_id));
 
             // Basic Validation for each item
@@ -198,7 +201,10 @@ const checkout = async (req, res) => {
                 }
             });
         }
+        console.time("stock-bulkWrite");
         await Inventory.bulkWrite(stockOperations);
+        console.timeEnd("stock-bulkWrite");
+
         console.timeEnd("stock-update");
 
         console.time("ledger");
