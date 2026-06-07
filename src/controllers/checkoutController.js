@@ -92,7 +92,7 @@ const checkout = async (req, res) => {
         const products = await Inventory.find({
             _id: { $in: productIds },
             storeId: req.storeId
-        });
+        }).lean();
         console.timeEnd('inventory-find');
 
         const productMap = new Map(
