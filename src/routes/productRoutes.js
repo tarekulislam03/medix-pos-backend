@@ -1,6 +1,6 @@
 import { Router } from "express";
 import multer from "multer";
-import { createProduct, deleteProduct, getProductById, getProducts, searchProduct, updateProduct, soonToExpiry, lowStock, autoImportProducts, autoImportConfirm, getLooseMedicinePrice } from "../controllers/productController.js"
+import { createProduct, deleteProduct, getProductById, getProducts, searchProduct, updateProduct, soonToExpiry, lowStock, autoImportProducts, autoImportConfirm, getLooseMedicinePrice, bulkAddFromMaster } from "../controllers/productController.js"
 
 import { normalizeImage } from "../middleware/imageNormalizationMiddleware.js";
 
@@ -15,6 +15,7 @@ productRouter.get("/lowstock", lowStock);
 productRouter.get("/soontoexpiry", soonToExpiry);
 productRouter.get("/search", searchProduct);
 productRouter.get("/loose-price/:id", getLooseMedicinePrice);
+productRouter.post("/bulk-from-master", bulkAddFromMaster);
 
 // auto import route
 const upload = multer({

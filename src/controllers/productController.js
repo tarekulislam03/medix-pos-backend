@@ -580,4 +580,89 @@ const autoImportConfirm = async (req, res) => {
         });
     }
 };
-export { createProduct, getProducts, getProductById, updateProduct, deleteProduct, searchProduct, lowStock, soonToExpiry, autoImportProducts, autoImportConfirm, getLooseMedicinePrice };
+// @desc    Bulk add products from master database
+// @route   POST /api/v1/product/bulk-from-master
+// @access  Private
+const bulkAddFromMaster = async (req, res) => {
+    try {
+        const { items } = req.body;
+        
+        if (!items || !Array.isArray(items) || items.length === 0) {
+            return res.status(400).json({ success: false, message: "No items provided" });
+        }
+
+        const storeId = req.storeId;
+        const added = [];
+        const skipped = [];
+
+        let currentShortBarcode = parseInt(await getNextShortBarcode(storeId), 10);
+
+        for (const item of items) {
+            const normalizedName = String(item.medicine_name || "").trim().toUpperCase();
+            
+            if (!normalizedName) {
+                skipped.push({ medicine_name: "UNKNOWN", reason: "Empty name" });
+                continue;
+            }
+
+            // Check if it already exists for this store
+            const existing = await Inventory.findOne({ 
+                storeId, 
+                medicine_name: normalizedName 
+            }).collation({ locale: "en", strength: 2 });
+
+            if (existing) {
+                const stockToAdd = item.stock ? Number(item.stock) : 0;
+                let updated = false;
+
+                if (!isNaN(stockToAdd) && stockToAdd > 0) {
+                    existing.quantity = (existing.quantity || 0) + stockToAdd;
+                    updated = true;
+                }
+
+                if (item.mrp !== undefined && item.mrp !== "" && !isNaN(Number(item.mrp)) && Number(item.mrp) !== existing.mrp) {
+                    existing.mrp = Number(item.mrp);
+                    updated = true;
+                }
+
+                if (updated) {
+                    await existing.save();
+                    upsertCacheEntry(storeId, existing);
+                    added.push(existing);
+                } else {
+                    skipped.push({ medicine_name: normalizedName, reason: "Already exists and no changes made" });
+                }
+                continue;
+            }
+
+            const barcodeString = `${normalizedName.replace(/\s/g, '')}-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
+            const shortBarcodeString = currentShortBarcode.toString();
+            currentShortBarcode++;
+
+            const newProduct = await Inventory.create({
+                storeId,
+                medicine_name: normalizedName,
+                mrp: Number(item.mrp || 0),
+                quantity: item.stock ? Number(item.stock) : 0,
+                gst: 5,
+                barcode: barcodeString,
+                short_barcode: shortBarcodeString,
+            });
+
+            upsertCacheEntry(storeId, newProduct);
+            added.push(newProduct);
+        }
+
+        res.status(201).json({
+            success: true,
+            added,
+            skipped,
+            message: `Added ${added.length} products, skipped ${skipped.length}`
+        });
+    } catch (error) {
+        console.error("bulkAddFromMaster error:", error);
+        res.status(500).json({ success: false, message: "Server error during bulk add" });
+    }
+};
+
+export { createProduct, getProducts, getProductById, updateProduct, deleteProduct, searchProduct, lowStock, soonToExpiry, autoImportProducts, autoImportConfirm, getLooseMedicinePrice, bulkAddFromMaster };

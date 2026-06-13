@@ -16,7 +16,7 @@ const registerUser = async (req, res) => {
 
     const store = await Store.create({
       storeName,
-      storePhone: phone
+      contactNumber: phone
     });
 
     const hashedPassword = await bcrypt.hash(password, 10);

@@ -7,13 +7,10 @@ const StoreSchema = new mongoose.Schema({
   },
   email: {
     type: String,
-    required: true,
-    unique: true,
     match: [/^[\w!#$%&'*+/=?^`{|}~.-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/, 'Please fill a valid email address']
   },
   password: {
-    type: String,
-    required: true
+    type: String
   },
   address: {
     type: String

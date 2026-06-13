@@ -53,6 +53,7 @@ import settingsRouter from "./routes/settingsRoutes.js";
 import purchaseRouter from "./routes/purchaseRoutes.js";
 import gstRouter from "./routes/gstRoutes.js";
 import expenseRouter from "./routes/expenseRoutes.js";
+import masterMedicineRouter from "./routes/masterMedicineRoutes.js";
 
 // 6. Routes
 app.use("/api/v1/user", userRouter);
@@ -65,6 +66,7 @@ app.use('/api/v1/settings', protect, settingsRouter);
 app.use('/api/v1/purchase', protect, purchaseRouter);
 app.use('/api/v1/gst', protect, gstRouter);
 app.use('/api/v1/expenses', protect, expenseRouter);
+app.use("/api/v1/master-medicines", masterMedicineRouter);
 
 app.get("/health", (req, res) => {
   res.status(200).json({ status: "ok" });
