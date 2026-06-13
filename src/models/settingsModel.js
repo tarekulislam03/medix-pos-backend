@@ -31,6 +31,14 @@ const settingSchema = new mongoose.Schema({
     upiId: {
         type: String,
         default: ""
+    },
+    printerSize: {
+        type: String,
+        default: "58mm"
+    },
+    showGstDetails: {
+        type: Boolean,
+        default: false
     }
 }, { timestamps: true });
 
