@@ -471,4 +471,59 @@ const deleteSaleById = async (req, res) => {
     }
 };
 
-export { todaySales, monthlySales, getSalesHistory, getSaleById, updateSaleById, deleteSaleById, searchSaleByInvoice };
+const getAnalyticsOverview = async (req, res) => {
+    try {
+        const match = { storeId: req.storeId };
+        
+        // Fetch only necessary fields to minimize payload
+        const sales = await Sales.find(match)
+            .select('created_at createdAt date grand_total total profit total_profit')
+            .lean();
+            
+        const dMap = {};
+        const mMap = {};
+        const pMap = {};
+        const dProfitMap = {};
+        
+        sales.forEach(sale => {
+            const d = new Date(sale.created_at || sale.createdAt || sale.date || new Date());
+            const dStr = [d.getFullYear(), String(d.getMonth() + 1).padStart(2, '0'), String(d.getDate()).padStart(2, '0')].join('-');
+            const mStr = [d.getFullYear(), String(d.getMonth() + 1).padStart(2, '0')].join('-');
+            const val = Number(sale.grand_total || sale.total || 0);
+            const profit = Number(sale.profit || sale.total_profit || 0);
+            
+            dMap[dStr] = (dMap[dStr] || 0) + val;
+            mMap[mStr] = (mMap[mStr] || 0) + val;
+            pMap[mStr] = (pMap[mStr] || 0) + profit;
+            dProfitMap[dStr] = (dProfitMap[dStr] || 0) + profit;
+        });
+        
+        const dailyData = Object.entries(dMap).map(([k, v]) => ({ date: k, total: v })).sort((a, b) => b.date.localeCompare(a.date));
+        const dailyProfitData = Object.entries(dProfitMap).map(([k, v]) => ({ date: k, profit: v })).sort((a, b) => b.date.localeCompare(a.date));
+        
+        const monthNames = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+        const monthlyData = Object.entries(mMap)
+            .map(([k, v]) => {
+                const [y, m] = k.split('-');
+                return { monthId: k, month: `${monthNames[parseInt(m) - 1]} ${y}`, total: v };
+            })
+            .sort((a, b) => b.monthId.localeCompare(a.monthId));
+        const monthlyProfitData = Object.entries(pMap)
+            .map(([k, v]) => {
+                const [y, m] = k.split('-');
+                return { monthId: k, month: `${monthNames[parseInt(m) - 1]} ${y}`, profit: v };
+            })
+            .sort((a, b) => b.monthId.localeCompare(a.monthId));
+            
+        return res.status(200).json({
+            dailyData,
+            monthlyData,
+            dailyProfitData,
+            monthlyProfitData
+        });
+    } catch (error) {
+        return res.status(500).json({ message: "Failed to generate analytics", error: error.message });
+    }
+};
+
+export { todaySales, monthlySales, getSalesHistory, getSaleById, updateSaleById, deleteSaleById, searchSaleByInvoice, getAnalyticsOverview };
