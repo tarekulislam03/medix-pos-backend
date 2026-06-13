@@ -23,7 +23,7 @@ const inventorySchema = new Schema({
 
     alert_threshold: {
         type: Number,
-        default: 10,
+        default: 2,
 
     },
 

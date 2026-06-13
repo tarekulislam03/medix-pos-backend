@@ -69,7 +69,7 @@ const createProduct = async (req, res) => {
             product.mrp = cleanNumber(mrp);
             product.supplier_name = supplier_name || null;
             product.expiry_date = expiry_date || null;
-            product.alert_threshold = alert_threshold || null;
+            product.alert_threshold = alert_threshold || 2;
             product.tablets_per_strip = tablets_per_strip ? cleanNumber(tablets_per_strip) : null;
             product.cost_price = cost_price ? cleanNumber(cost_price) : null;
             product.batch_number = batch_number || "";
@@ -102,7 +102,7 @@ const createProduct = async (req, res) => {
                 quantity: cleanNumber(quantity),
                 supplier_name: supplier_name || null,
                 expiry_date: expiry_date || null,
-                alert_threshold: alert_threshold || null,
+                alert_threshold: alert_threshold || 2,
                 tablets_per_strip: tablets_per_strip ? cleanNumber(tablets_per_strip) : null,
                 cost_price: cost_price ? cleanNumber(cost_price) : null,
                 batch_number: batch_number || "",
@@ -625,6 +625,19 @@ const bulkAddFromMaster = async (req, res) => {
                     updated = true;
                 }
 
+                let validExpiry = null;
+                if (item.expiry_date) {
+                    const d = new Date(item.expiry_date);
+                    if (!isNaN(d.getTime())) {
+                        validExpiry = d;
+                    }
+                }
+
+                if (validExpiry) {
+                    existing.expiry_date = validExpiry;
+                    updated = true;
+                }
+
                 if (updated) {
                     await existing.save();
                     upsertCacheEntry(storeId, existing);
@@ -639,6 +652,16 @@ const bulkAddFromMaster = async (req, res) => {
             const shortBarcodeString = currentShortBarcode.toString();
             currentShortBarcode++;
 
+            const batchNumber = 'B' + Math.random().toString(36).substring(2, 8).toUpperCase();
+
+            let validExpiry = null;
+            if (item.expiry_date) {
+                const d = new Date(item.expiry_date);
+                if (!isNaN(d.getTime())) {
+                    validExpiry = d;
+                }
+            }
+
             const newProduct = await Inventory.create({
                 storeId,
                 medicine_name: normalizedName,
@@ -647,6 +670,8 @@ const bulkAddFromMaster = async (req, res) => {
                 gst: 5,
                 barcode: barcodeString,
                 short_barcode: shortBarcodeString,
+                batch_number: batchNumber,
+                ...(validExpiry ? { expiry_date: validExpiry } : {})
             });
 
             upsertCacheEntry(storeId, newProduct);
