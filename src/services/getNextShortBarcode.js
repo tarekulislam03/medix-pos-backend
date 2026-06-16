@@ -10,17 +10,16 @@ export const getNextShortBarcode = async (storeId) => {
 
     const base = lastProduct ? Number(lastProduct.short_barcode) : 100000;
 
-    const counter = await Counter.findOneAndUpdate(
-        { storeId },
-        {
-            $max: { short_barcode_seq: base },
-            $inc: { short_barcode_seq: 1 }
-        },
-        {
-            new: true,
-            upsert: true
+    let counter = await Counter.findOne({ storeId });
+    if (!counter) {
+        counter = await Counter.create({ storeId, short_barcode_seq: base + 1 });
+    } else {
+        if (counter.short_barcode_seq < base) {
+            counter.short_barcode_seq = base;
         }
-    );
+        counter.short_barcode_seq += 1;
+        await counter.save();
+    }
 
     return String(counter.short_barcode_seq);
 };
