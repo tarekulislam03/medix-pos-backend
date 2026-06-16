@@ -6,7 +6,7 @@ const ai = new GoogleGenAI({
 
 export const callVisionModel = async (base64Image) => {
     const response = await ai.models.generateContent({
-        model: "gemini-2.5-flash",
+        model: "gemini-2.5-flash-lite",
         contents: [
             {
                 role: "user",
