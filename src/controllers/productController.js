@@ -1,8 +1,8 @@
 import bwipjs from "bwip-js";
 import Inventory from "../models/productModel.js";
-import sharp from "sharp";
 import { callVisionModel } from "../services/llmService.js";
 import { safeParseJSON } from "../services/jsonParser.js";
+import { optimizeInvoiceImage } from "../services/imageOptimizer.js";
 import {
     searchCache,
     upsertCacheEntry,
@@ -393,18 +393,19 @@ const autoImportProducts = async (req, res) => {
         const originalName = req.file.originalname;
         const originalMime = req.file.mimetype;
 
-        //Preprocess Image (rotate + resize + force format)
-        const processedBuffer = await sharp(originalBuffer)
-            .rotate()               // auto-fix orientation
-            .resize({ width: 1200 }) // optimize for OCR
-            .png()                   // Force output to PNG format
-            .toBuffer();
+        // Preprocess and Optimize Image
+        let optimizedImage;
+        try {
+            optimizedImage = await optimizeInvoiceImage(originalBuffer, originalMime);
+        } catch (optimizeError) {
+            return res.status(400).json({
+                success: false,
+                message: optimizeError.message
+            });
+        }
 
-        //Convert to base64
-        const base64Image = processedBuffer.toString("base64");
-
-        //Call AI
-        const aiRaw = await callVisionModel(base64Image);
+        // Call AI
+        const aiRaw = await callVisionModel(optimizedImage.base64, optimizedImage.mimeType);
 
         const parsed = safeParseJSON(aiRaw);
 
@@ -492,6 +493,7 @@ const autoImportConfirm = async (req, res) => {
 
         let updatedCount = 0;
         let createdCount = 0;
+        let importedItemsList = [];
 
         const cleanNumber = (val) =>
             Number(String(val || 0).replace(/[^\d.]/g, "")) || 0;
@@ -554,6 +556,15 @@ const autoImportConfirm = async (req, res) => {
             } else {
                 updatedCount++;
             }
+
+            // Collect the processed item to link to the Purchase record
+            if (result.value && result.value._id) {
+                importedItemsList.push({
+                    inventoryId: result.value._id,
+                    quantity: cleanNumber(item.quantity),
+                    mrp: cleanNumber(item.mrp)
+                });
+            }
         }
 
         // Reload cache after bulk import to capture all new/updated products
@@ -562,7 +573,8 @@ const autoImportConfirm = async (req, res) => {
         return res.json({
             success: true,
             updated_products: updatedCount,
-            new_products: createdCount
+            new_products: createdCount,
+            imported_items: importedItemsList
         });
 
     } catch (error) {

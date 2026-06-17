@@ -61,6 +61,13 @@ const purchaseSchema = new mongoose.Schema(
             default: "",
         },
 
+        // Links to the exact Inventory records created/updated during auto-import
+        imported_items: [{
+            inventoryId: { type: mongoose.Schema.Types.ObjectId, ref: "Inventory" },
+            quantity: { type: Number, default: 0 },
+            mrp: { type: Number, default: 0 }
+        }],
+
         // Source: 'manual' = uploaded from Purchase page, 'auto_import' = from Inventory auto-import
         source: {
             type: String,

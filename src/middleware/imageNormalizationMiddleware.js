@@ -34,7 +34,7 @@ const normalizeImage = async (req, res, next) => {
         buffer = await sharp(buffer)
             .rotate()
             .resize({
-                width: 1000,
+                width: 400,
                 withoutEnlargement: true
             })
             .jpeg({ quality: 90 })

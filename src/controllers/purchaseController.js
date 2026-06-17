@@ -79,16 +79,17 @@ const uploadBill = async (req, res) => {
 const finalizePurchase = async (req, res) => {
     try {
         const { id } = req.params;
-        const { supplier_name, total_amount, items_count } = req.body;
+        const { supplier_name, total_amount, items_count, imported_items } = req.body;
 
         const purchase = await Purchase.findOneAndUpdate(
             { _id: id, storeId: req.storeId },
             {
                 $set: {
-                    status:        "received",
-                    supplier_name: supplier_name  || "",
-                    total_amount:  Number(total_amount)  || 0,
-                    items_count:   Number(items_count)   || 0,
+                    status:         "received",
+                    supplier_name:  supplier_name  || "",
+                    total_amount:   Number(total_amount)  || 0,
+                    items_count:    Number(items_count)   || 0,
+                    imported_items: imported_items || [],
                 },
             },
             { new: true }
