@@ -283,6 +283,7 @@ const lowStock = async (req, res) => {
         // find low stock products ( quantity <= alert_threshold )
         const low = await Inventory.find({
             storeId: req.storeId,
+            returned_to_supplier: { $ne: true },
             $expr: { $lte: ["$quantity", "$alert_threshold"] }
         })
 
@@ -310,6 +311,7 @@ const soonToExpiry = async (req, res) => {
 
         const expiry = await Inventory.find({
             storeId: req.storeId,
+            returned_to_supplier: { $ne: true },
             expiry_date: { $lte: next90Days }
         })
 
