@@ -2,7 +2,7 @@ import xss from 'xss';
 
 const sanitizeMongo = (value) => {
   if (typeof value === 'string') {
-    return value.replace(/\$|\./g, '');
+    return value; // Do not strip dots and dollar signs from string values (corrupts data like "Dolo 6.25" or prices)
   }
   if (typeof value === 'object' && value !== null) {
     Object.keys(value).forEach(key => {

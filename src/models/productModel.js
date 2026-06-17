@@ -59,6 +59,14 @@ const inventorySchema = new Schema({
         type: Number,
         default: 0
     },
+    returned_to_supplier: {
+        type: Boolean,
+        default: false
+    },
+    loss_saved_amount: {
+        type: Number,
+        default: 0
+    },
     storeId: {
         type: mongoose.Schema.Types.ObjectId,
         ref: "Store",

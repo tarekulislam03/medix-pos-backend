@@ -197,6 +197,9 @@ const checkout = async (req, res) => {
             });
         }
         await Inventory.bulkWrite(stockOperations);
+        
+        // Remove zero stock items from inventory automatically after a sale
+        await Inventory.deleteMany({ _id: { $in: productIds }, storeId: req.storeId, quantity: { $lte: 0 } });
 
         subtotal = Number(subtotal.toFixed(2));
         total_discount = Number(total_discount.toFixed(2));
