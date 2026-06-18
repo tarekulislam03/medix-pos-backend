@@ -3,12 +3,7 @@ import Inventory from "../models/productModel.js";
 import { callVisionModel } from "../services/llmService.js";
 import { safeParseJSON } from "../services/jsonParser.js";
 import { optimizeInvoiceImage } from "../services/imageOptimizer.js";
-import {
-    searchCache,
-    upsertCacheEntry,
-    removeCacheEntry,
-    loadProducts,
-} from "../services/productCacheService.js";
+
 import { uploadToCloudinary } from "./purchaseController.js";
 import Purchase from "../models/purchaseModel.js";
 
@@ -78,8 +73,7 @@ const createProduct = async (req, res) => {
 
             await product.save();
 
-            // Sync cache immediately
-            upsertCacheEntry(req.storeId, product);
+
 
             return res.status(200).json({
                 message: "Product updated",
@@ -110,8 +104,7 @@ const createProduct = async (req, res) => {
                 gst: gst ? cleanNumber(gst) : 0
             });
 
-            // Sync cache immediately
-            upsertCacheEntry(req.storeId, product);
+
 
             return res.status(201).json({
                 message: "Product created",
@@ -202,9 +195,6 @@ const updateProduct = async (req, res) => {
             })
         }
 
-        // Sync cache immediately
-        upsertCacheEntry(req.storeId, update);
-
         res.status(200).json({
             message: "Product updated successfully!",
             data: update
@@ -229,9 +219,6 @@ const deleteProduct = async (req, res) => {
                 message: "No products found"
             })
         }
-
-        // Remove from cache immediately
-        removeCacheEntry(req.storeId, req.params.id);
 
         res.status(200).json({
             message: "Product delted successfully!",
@@ -260,8 +247,17 @@ const searchProduct = async (req, res) => {
             });
         }
 
-        // Search from in-memory cache (top 10 results)
-        const results = searchCache(req.storeId.toString(), keyword, 10);
+        // Search from MongoDB directly
+        const queryRegex = new RegExp(escapeRegExp(keyword), 'i');
+        const results = await Inventory.find({
+            storeId: req.storeId,
+            $or: [
+                { medicine_name: queryRegex },
+                { short_barcode: queryRegex },
+                { batch_number: queryRegex },
+                { barcode: queryRegex }
+            ]
+        }).limit(10).lean();
 
         return res.status(200).json({
             count: `${results.length} products found for this keyword`,
@@ -567,8 +563,6 @@ const autoImportConfirm = async (req, res) => {
             }
         }
 
-        // Reload cache after bulk import to capture all new/updated products
-        await loadProducts();
 
         return res.json({
             success: true,
@@ -654,7 +648,6 @@ const bulkAddFromMaster = async (req, res) => {
 
                 if (updated) {
                     await existing.save();
-                    upsertCacheEntry(storeId, existing);
                     added.push(existing);
                 } else {
                     skipped.push({ medicine_name: normalizedName, reason: "Already exists and no changes made" });
@@ -688,7 +681,7 @@ const bulkAddFromMaster = async (req, res) => {
                 ...(validExpiry ? { expiry_date: validExpiry } : {})
             });
 
-            upsertCacheEntry(storeId, newProduct);
+
             added.push(newProduct);
         }
 
