@@ -239,26 +239,30 @@ const updateSaleById = async (req, res) => {
             // Find product, handling potential missing or invalid product_ids safely
             let product = null;
             const pid = item.product_id ? String(item.product_id) : '';
+            const itemQty = Number(item.quantity) || 0;
+
             if (pid && pid.length === 24 && !pid.startsWith('manual_')) {
                 product = await Inventory.findOne({ _id: pid, storeId: req.storeId });
             }
 
-            // If product is not found (e.g., manual item or deleted item), we create a fallback product object
+            // If product is not found (e.g., manual item or deleted item), use item data as fallback
             if (!product) {
+                // Use a valid ObjectId if the pid looks like one, otherwise generate new one
+                const fallbackId = (pid && pid.length === 24) ? pid : new (await import('mongoose')).default.Types.ObjectId();
                 product = {
-                    _id: item.product_id || `manual_${Date.now()}`,
+                    _id: fallbackId,
                     medicine_name: item.medicine_name || 'Unknown Item',
                     mrp: Number(item.mrp || 0),
                     cost_price: 0,
-                    quantity: 99999, // infinite for manual items
+                    quantity: 99999,
                     barcode: '',
                     gst: item.gst_percent || 0,
                     hsn_code: '',
-                    save: async () => {} // no-op for stock update
+                    _isManual: true
                 };
             }
 
-            if (product.quantity < item.quantity) {
+            if (product.quantity < itemQty) {
                  for (const oldItem of existingSale.items) {
                     const rPid = oldItem.product_id ? String(oldItem.product_id) : '';
                     if (rPid && rPid.length === 24 && !rPid.startsWith('manual_')) {
@@ -287,7 +291,7 @@ const updateSaleById = async (req, res) => {
             if (item.is_loose_sale) {
                 itemSubtotal = Number(item.loose_total_price || 0);
             } else {
-                itemSubtotal = product.mrp * item.quantity;
+                itemSubtotal = product.mrp * itemQty;
             }
             const discountAmount = Number(((itemSubtotal * discountPercent) / 100).toFixed(2));
             const itemTotal = Number((itemSubtotal - discountAmount).toFixed(2));
@@ -317,7 +321,7 @@ const updateSaleById = async (req, res) => {
             total_discount = total_discount + discountAmount;
             
             const itemCostPrice = Number(product.cost_price || product.mrp || 0);
-            const itemProfit = itemTotal - (itemCostPrice * item.quantity);
+            const itemProfit = itemTotal - (itemCostPrice * itemQty);
             total_profit += itemProfit;
             
             total_taxable = total_taxable + taxableAmount;
@@ -330,7 +334,7 @@ const updateSaleById = async (req, res) => {
                 barcode: product.barcode || '',
                 mrp: product.mrp,
                 cost_price: itemCostPrice,
-                quantity: item.quantity,
+                quantity: itemQty,
                 discount_percent: discountPercent,
                 discount_amount: discountAmount,
                 total: itemTotal,
@@ -340,9 +344,9 @@ const updateSaleById = async (req, res) => {
                 sgst_amount: sgstAmount
             });
 
-            // Deduct stock
-            if (!String(product._id).startsWith('manual_')) {
-                product.quantity -= item.quantity;
+            // Deduct stock only for real inventory products
+            if (!product._isManual) {
+                product.quantity -= itemQty;
                 if (product.quantity < 0) product.quantity = 0;
                 await product.save();
             }
@@ -428,8 +432,8 @@ const updateSaleById = async (req, res) => {
         });
 
     } catch (error) {
-        console.error(error);
-        res.status(500).json({ success: false, message: "Failed to update sale" });
+        console.error('updateSaleById error:', error.message, error.stack);
+        res.status(500).json({ success: false, message: "Failed to update sale", error: error.message });
     }
 };
 
