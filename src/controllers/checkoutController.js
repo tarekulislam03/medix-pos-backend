@@ -96,13 +96,21 @@ const checkout = async (req, res) => {
 
         for (const item of items) {
 
-            const product = productMap.get(String(item.product_id));
+            let product = productMap.get(String(item.product_id));
 
-            // Basic Validation for each item
+            // If product is not found, fallback for manual entry
             if (!product) {
-                return res.status(404).json({
-                    message: "Product not found"
-                });
+                product = {
+                    _id: item.product_id || `manual_${Date.now()}`,
+                    medicine_name: item.medicine_name || 'Unknown Item',
+                    mrp: Number(item.mrp || 0),
+                    cost_price: 0,
+                    quantity: 99999, // infinite for manual
+                    barcode: '',
+                    gst: item.gst_percent || 0,
+                    hsn_code: '',
+                    save: async () => {} // no-op
+                };
             }
 
             // Stock aviailability check
@@ -120,7 +128,12 @@ const checkout = async (req, res) => {
                 });
             }
 
-            const itemSubtotal = product.mrp * item.quantity;
+            let itemSubtotal = 0;
+            if (item.is_loose_sale) {
+                itemSubtotal = Number(item.loose_total_price || 0);
+            } else {
+                itemSubtotal = product.mrp * item.quantity;
+            }
 
             const discountAmount = Number(
                 ((itemSubtotal * discountPercent) / 100).toFixed(2)
@@ -181,20 +194,22 @@ const checkout = async (req, res) => {
                 hsn_code: product.hsn_code || ""
             });
 
-            // Deduct stock
-            stockOperations.push({
-                updateOne: {
-                    filter: {
-                        _id: product._id,
-                        storeId: req.storeId
-                    },
-                    update: {
-                        $inc: {
-                            quantity: -item.quantity
+            // Deduct stock only for real products
+            if (!String(product._id).startsWith('manual_')) {
+                stockOperations.push({
+                    updateOne: {
+                        filter: {
+                            _id: product._id,
+                            storeId: req.storeId
+                        },
+                        update: {
+                            $inc: {
+                                quantity: -item.quantity
+                            }
                         }
                     }
-                }
-            });
+                });
+            }
         }
         await Inventory.bulkWrite(stockOperations);
         

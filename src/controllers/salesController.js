@@ -206,10 +206,13 @@ const updateSaleById = async (req, res) => {
         
         // Revert Inventory for old items
         for (const oldItem of existingSale.items) {
-            const product = await Inventory.findOne({ _id: oldItem.product_id, storeId: req.storeId });
-            if (product) {
-                product.quantity += oldItem.quantity;
-                await product.save();
+            const oldPid = oldItem.product_id ? String(oldItem.product_id) : '';
+            if (oldPid && oldPid.length === 24 && !oldPid.startsWith('manual_')) {
+                const product = await Inventory.findOne({ _id: oldPid, storeId: req.storeId });
+                if (product) {
+                    product.quantity += oldItem.quantity;
+                    await product.save();
+                }
             }
         }
 
@@ -233,21 +236,35 @@ const updateSaleById = async (req, res) => {
         const saleItems = [];
 
         for (const item of items) {
-            const product = await Inventory.findOne({ _id: item.product_id, storeId: req.storeId });
+            // Find product, handling potential missing or invalid product_ids safely
+            let product = null;
+            const pid = item.product_id ? String(item.product_id) : '';
+            if (pid && pid.length === 24 && !pid.startsWith('manual_')) {
+                product = await Inventory.findOne({ _id: pid, storeId: req.storeId });
+            }
 
+            // If product is not found (e.g., manual item or deleted item), we create a fallback product object
             if (!product) {
-                
-                for (const oldItem of existingSale.items) {
-                    const prod = await Inventory.findOne({ _id: oldItem.product_id, storeId: req.storeId });
-                    if (prod) { prod.quantity -= oldItem.quantity; await prod.save(); }
-                }
-                return res.status(404).json({ success: false, message: "Product not found" });
+                product = {
+                    _id: item.product_id || `manual_${Date.now()}`,
+                    medicine_name: item.medicine_name || 'Unknown Item',
+                    mrp: Number(item.mrp || 0),
+                    cost_price: 0,
+                    quantity: 99999, // infinite for manual items
+                    barcode: '',
+                    gst: item.gst_percent || 0,
+                    hsn_code: '',
+                    save: async () => {} // no-op for stock update
+                };
             }
 
             if (product.quantity < item.quantity) {
                  for (const oldItem of existingSale.items) {
-                    const prod = await Inventory.findOne({ _id: oldItem.product_id, storeId: req.storeId });
-                    if (prod) { prod.quantity -= oldItem.quantity; await prod.save(); }
+                    const rPid = oldItem.product_id ? String(oldItem.product_id) : '';
+                    if (rPid && rPid.length === 24 && !rPid.startsWith('manual_')) {
+                        const prod = await Inventory.findOne({ _id: rPid, storeId: req.storeId });
+                        if (prod) { prod.quantity -= oldItem.quantity; await prod.save(); }
+                    }
                 }
                 return res.status(400).json({ success: false, message: `Insufficient stock for ${product.medicine_name}` });
             }
@@ -256,13 +273,22 @@ const updateSaleById = async (req, res) => {
 
             if (discountPercent < 0 || discountPercent > 100) {
                  for (const oldItem of existingSale.items) {
-                    const prod = await Inventory.findOne({ _id: oldItem.product_id, storeId: req.storeId });
-                    if (prod) { prod.quantity -= oldItem.quantity; await prod.save(); }
+                    const rPid2 = oldItem.product_id ? String(oldItem.product_id) : '';
+                    if (rPid2 && rPid2.length === 24 && !rPid2.startsWith('manual_')) {
+                        const prod = await Inventory.findOne({ _id: rPid2, storeId: req.storeId });
+                        if (prod) { prod.quantity -= oldItem.quantity; await prod.save(); }
+                    }
                 }
                 return res.status(400).json({ success: false, message: "Discount must be between 0 and 100" });
             }
 
-            const itemSubtotal = product.mrp * item.quantity;
+            let itemSubtotal = 0;
+            // Handle loose sales correctly
+            if (item.is_loose_sale) {
+                itemSubtotal = Number(item.loose_total_price || 0);
+            } else {
+                itemSubtotal = product.mrp * item.quantity;
+            }
             const discountAmount = Number(((itemSubtotal * discountPercent) / 100).toFixed(2));
             const itemTotal = Number((itemSubtotal - discountAmount).toFixed(2));
 
@@ -301,7 +327,7 @@ const updateSaleById = async (req, res) => {
             saleItems.push({
                 product_id: product._id,
                 medicine_name: product.medicine_name,
-                barcode: product.barcode,
+                barcode: product.barcode || '',
                 mrp: product.mrp,
                 cost_price: itemCostPrice,
                 quantity: item.quantity,
@@ -315,8 +341,10 @@ const updateSaleById = async (req, res) => {
             });
 
             // Deduct stock
-            product.quantity -= item.quantity;
-            await product.save();
+            if (!String(product._id).startsWith('manual_')) {
+                product.quantity -= item.quantity;
+                await product.save();
+            }
         }
 
         subtotal = Number(subtotal.toFixed(2));
