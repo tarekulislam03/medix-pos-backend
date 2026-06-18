@@ -80,6 +80,7 @@ const inventorySchema = new Schema({
     });
 
 inventorySchema.index({ storeId: 1, medicine_name: 1 });
+inventorySchema.index({ storeId: 1, medicine_name: 1, batch_number: 1 }, { unique: true });
 inventorySchema.index({ storeId: 1, barcode: 1 }, { unique: true, sparse: true });
 inventorySchema.index({ storeId: 1, short_barcode: 1 }, { unique: true, sparse: true });
 

@@ -36,7 +36,8 @@ const createProduct = async (req, res) => {
             cost_price,
             batch_number,
             hsn_code,
-            gst
+            gst,
+            force_update
         } = req.body;
 
         if (!medicine_name || !mrp || !quantity) {
@@ -59,9 +60,38 @@ const createProduct = async (req, res) => {
         });
 
         if (product) {
+            const incomingMrp = cleanNumber(mrp);
+            const existingMrp = product.mrp;
+            
+            // Normalize dates for comparison (Y-m-d)
+            const incomingExpiry = expiry_date ? new Date(expiry_date).toISOString().split('T')[0] : null;
+            const existingExpiry = product.expiry_date ? new Date(product.expiry_date).toISOString().split('T')[0] : null;
+
+            const isUnbatched = !product.batch_number || product.batch_number.trim() === '';
+            const hasConflict = !isUnbatched && ((incomingMrp !== existingMrp) || (incomingExpiry !== existingExpiry));
+
+            if (hasConflict && !force_update) {
+                return res.status(409).json({
+                    success: false,
+                    has_conflict: true,
+                    conflict: {
+                        medicine_name: product.medicine_name,
+                        batch_number: product.batch_number,
+                        existing_mrp: existingMrp,
+                        incoming_mrp: incomingMrp,
+                        existing_expiry: existingExpiry,
+                        incoming_expiry: incomingExpiry,
+                        conflict_fields: [
+                            ...(incomingMrp !== existingMrp ? ['mrp'] : []),
+                            ...(incomingExpiry !== existingExpiry ? ['expiry_date'] : [])
+                        ]
+                    },
+                    message: `Batch conflict detected for ${product.medicine_name} (Batch: ${product.batch_number || 'None'}).`
+                });
+            }
 
             product.quantity += cleanNumber(quantity);
-            product.mrp = cleanNumber(mrp);
+            product.mrp = incomingMrp;
             product.supplier_name = supplier_name || null;
             product.expiry_date = expiry_date || null;
             product.alert_threshold = alert_threshold || 2;
