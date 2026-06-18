@@ -343,6 +343,7 @@ const updateSaleById = async (req, res) => {
             // Deduct stock
             if (!String(product._id).startsWith('manual_')) {
                 product.quantity -= item.quantity;
+                if (product.quantity < 0) product.quantity = 0;
                 await product.save();
             }
         }

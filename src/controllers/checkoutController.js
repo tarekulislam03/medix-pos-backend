@@ -211,10 +211,24 @@ const checkout = async (req, res) => {
                 });
             }
         }
-        await Inventory.bulkWrite(stockOperations);
+        if (stockOperations.length > 0) {
+            await Inventory.bulkWrite(stockOperations);
+        }
         
-        // Remove zero stock items from inventory automatically after a sale
-        await Inventory.deleteMany({ _id: { $in: productIds }, storeId: req.storeId, quantity: { $lte: 0 } });
+        // Clamp any negative stock to 0
+        await Inventory.updateMany(
+            { _id: { $in: productIds }, storeId: req.storeId, quantity: { $lt: 0 } },
+            { $set: { quantity: 0 } }
+        );
+
+        // Only remove zero-stock items that HAVE a batch number (batch-specific products).
+        // Products without batch number stay in inventory for restocking.
+        await Inventory.deleteMany({
+            _id: { $in: productIds },
+            storeId: req.storeId,
+            quantity: { $lte: 0 },
+            batch_number: { $exists: true, $ne: "" }
+        });
 
         subtotal = Number(subtotal.toFixed(2));
         total_discount = Number(total_discount.toFixed(2));
