@@ -1,6 +1,6 @@
 import { Router } from "express";
 import multer from "multer";
-import { uploadBill, getPurchases, deletePurchase, finalizePurchase } from "../controllers/purchaseController.js";
+import { uploadBill, getPurchases, deletePurchase, finalizePurchase, createManualPurchase } from "../controllers/purchaseController.js";
 
 const purchaseRouter = Router();
 
@@ -18,6 +18,7 @@ const upload = multer({
     },
 });
 
+purchaseRouter.post("/manual", createManualPurchase);
 purchaseRouter.post("/upload-bill", upload.single("bill"), uploadBill);
 purchaseRouter.get("/", getPurchases);
 purchaseRouter.patch("/:id/finalize", finalizePurchase);

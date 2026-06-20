@@ -7,34 +7,11 @@ import { protect } from "./middleware/authMiddleware.js";
 
 const app = express();
 
-// 1. Allowed origins
-const allowedOrigins = [
-  'http://localhost:8081',
-  'http://localhost:5173',
-  'http://localhost:3000',
-  'https://www.app.usemedix.online', 
-  'https://app.usemedix.online',
-  'http://localhost:63518',
-];
-
 // 2. Security headers
 app.use(helmet());
 
 // 3. CORS 
-app.use(cors({
-  origin: (origin, callback) => {
-    if (!origin) return callback(null, true);
-    if (allowedOrigins.includes(origin)) {
-      callback(null, true);
-    } else {
-      callback(new Error(`CORS blocked: ${origin}`));
-    }
-  },
-  methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH'],
-  allowedHeaders: ['Content-Type', 'Authorization'],
-  credentials: true,
-  optionsSuccessStatus: 200,
-}));
+app.use(cors());
 
 // 4. Parse body
 app.use(express.json({ limit: '200kb' }));

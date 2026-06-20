@@ -1,6 +1,7 @@
 import axios from "axios";
 import FormData from "form-data";
 import Purchase from "../models/purchaseModel.js";
+import Inventory from "../models/productModel.js";
 
 // ── Shared Cloudinary uploader ─────────────────────────────────────────────
 // Exported so productController can reuse it without duplication.
@@ -130,4 +131,130 @@ const deletePurchase = async (req, res) => {
     }
 };
 
-export { uploadBill, getPurchases, deletePurchase, finalizePurchase };
+const getNextShortBarcode = async (storeId) => {
+    const lastProduct = await Inventory.findOne({ storeId, short_barcode: { $exists: true } })
+        .sort({ short_barcode: -1 })
+        .collation({ locale: "en_US", numericOrdering: true });
+
+    if (lastProduct && lastProduct.short_barcode && !isNaN(lastProduct.short_barcode)) {
+        return (parseInt(lastProduct.short_barcode, 10) + 1).toString();
+    }
+    return "100001";
+};
+
+const escapeRegExp = (string) => {
+    return string.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+};
+
+const createManualPurchase = async (req, res) => {
+    try {
+        const { 
+            supplier_name,
+            supplier_gstin,
+            bill_no, 
+            bill_date, 
+            items, 
+            taxable_amount, 
+            cgst_amount, 
+            sgst_amount, 
+            total_amount,
+            notes 
+        } = req.body;
+
+        if (!items || items.length === 0) {
+            return res.status(400).json({ success: false, message: "Purchase must contain at least one item." });
+        }
+
+        const imported_items = [];
+        
+        for (const item of items) {
+            const normalizedName = (item.medicine_name || "").trim().toUpperCase();
+            if (!normalizedName) continue;
+            
+            const cleanNumber = (val) => Number(String(val || 0).replace(/[^\d.]/g, "")) || 0;
+            const batchNum = item.batch_number || "";
+            
+            let product = await Inventory.findOne({
+                storeId: req.storeId,
+                medicine_name: {
+                    $regex: new RegExp(`^${escapeRegExp(normalizedName)}$`, "i")
+                },
+                batch_number: batchNum
+            });
+
+            let rateAmount = cleanNumber(item.rate);
+            let discountPercent = cleanNumber(item.discount);
+            let costPriceAfterDiscount = rateAmount - (rateAmount * (discountPercent / 100));
+
+            if (product) {
+                // Update existing batch (forces overwrite of MRP/Expiry)
+                product.quantity += cleanNumber(item.quantity);
+                product.mrp = cleanNumber(item.mrp);
+                product.supplier_name = supplier_name || product.supplier_name;
+                if (item.expiry_date) product.expiry_date = item.expiry_date;
+                if (item.rate !== undefined) product.cost_price = costPriceAfterDiscount;
+                if (item.hsn_code) product.hsn_code = item.hsn_code;
+                if (item.gst !== undefined) product.gst = cleanNumber(item.gst);
+                
+                await product.save();
+                
+                imported_items.push({
+                    inventoryId: product._id,
+                    quantity: cleanNumber(item.quantity),
+                    mrp: cleanNumber(item.mrp)
+                });
+            } else {
+                // Create new inventory
+                const short_barcode = await getNextShortBarcode(req.storeId);
+                const newProduct = await Inventory.create({
+                    medicine_name: normalizedName,
+                    mrp: cleanNumber(item.mrp),
+                    quantity: cleanNumber(item.quantity),
+                    cost_price: item.rate !== undefined ? costPriceAfterDiscount : null,
+                    supplier_name: supplier_name || "",
+                    expiry_date: item.expiry_date || null,
+                    batch_number: batchNum,
+                    hsn_code: item.hsn_code || "",
+                    gst: item.gst ? cleanNumber(item.gst) : 0,
+                    short_barcode: short_barcode,
+                    storeId: req.storeId
+                });
+                
+                imported_items.push({
+                    inventoryId: newProduct._id,
+                    quantity: cleanNumber(item.quantity),
+                    mrp: cleanNumber(item.mrp)
+                });
+            }
+        }
+
+        const purchase = await Purchase.create({
+            storeId: req.storeId,
+            supplier_name: supplier_name || "",
+            supplier_gstin: supplier_gstin || "",
+            bill_no: bill_no || "",
+            bill_date: bill_date || "",
+            notes: notes || "",
+            taxable_amount: Number(taxable_amount) || 0,
+            cgst_amount: Number(cgst_amount) || 0,
+            sgst_amount: Number(sgst_amount) || 0,
+            total_amount: Number(total_amount) || 0,
+            items_count: items.length,
+            imported_items: imported_items,
+            source: "manual",
+            status: "received"
+        });
+
+        return res.status(201).json({
+            success: true,
+            message: "Manual purchase saved and inventory updated successfully.",
+            data: purchase,
+        });
+
+    } catch (error) {
+        console.error("Create Manual Purchase Error:", error.message);
+        return res.status(500).json({ success: false, message: error.message });
+    }
+};
+
+export { uploadBill, getPurchases, deletePurchase, finalizePurchase, createManualPurchase };
