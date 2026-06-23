@@ -26,14 +26,16 @@ const todaySales = async (req, res) => {
             {
                 $group: {
                     _id: null,
-                    total_sales: { $sum: "$grand_total" }
+                    total_sales: { $sum: "$grand_total" },
+                    total_orders: { $sum: 1 }
                 }
             }
         ]);
 
         return res.status(200).json({
             data: result[0] || {
-                total_sales: 0
+                total_sales: 0,
+                total_orders: 0
             }
         });
 
