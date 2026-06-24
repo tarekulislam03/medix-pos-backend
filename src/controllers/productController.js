@@ -1,8 +1,10 @@
 import bwipjs from "bwip-js";
 import Inventory from "../models/productModel.js";
-import { callVisionModel } from "../services/llmService.js";
+import { parseInvoiceText } from "../services/llmService.js";
 import { safeParseJSON } from "../services/jsonParser.js";
 import { optimizeInvoiceImage } from "../services/imageOptimizer.js";
+import { normalizeImage } from "../middleware/imageNormalizationMiddleware.js";
+import { extractTextFromOCRSpace } from "../middleware/textExtractorMiddleware.js";
 
 import { uploadToCloudinary } from "./purchaseController.js";
 import Purchase from "../models/purchaseModel.js";
@@ -63,7 +65,7 @@ const createProduct = async (req, res) => {
         if (product) {
             const incomingMrp = cleanNumber(mrp);
             const existingMrp = product.mrp;
-            
+
             // Normalize dates for comparison (Y-m-d)
             const incomingExpiry = expiry_date ? new Date(expiry_date).toISOString().split('T')[0] : null;
             const existingExpiry = product.expiry_date ? new Date(product.expiry_date).toISOString().split('T')[0] : null;
@@ -407,38 +409,67 @@ const getLooseMedicinePrice = async (req, res) => {
 
 // auto product import from bill image using AI
 const autoImportProducts = async (req, res) => {
+    const t0 = Date.now();
+
     try {
         if (!req.file) {
             return res.status(400).json({
                 success: false,
-                message: "No image uploaded"
+                message: "No image uploaded",
             });
         }
 
-        // Keep the original buffer for Cloudinary (before sharp resizes it)
+        console.log("[1] Request received");
+
         const originalBuffer = req.file.buffer;
         const originalName = req.file.originalname;
         const originalMime = req.file.mimetype;
 
-        // Preprocess and Optimize Image
-        let optimizedImage;
-        try {
-            optimizedImage = await optimizeInvoiceImage(originalBuffer, originalMime);
-        } catch (optimizeError) {
-            return res.status(400).json({
-                success: false,
-                message: optimizeError.message
-            });
+        console.log("[1.5] Image compression start");
+        const { buffer: compressedBuffer } = await optimizeInvoiceImage(originalBuffer, originalMime);
+        console.log("[1.6] Image compression end", Date.now() - t0, "ms");
+
+        console.log("[2] OCR.Space start");
+        // calling text extractor middleware
+        const ocrText = await extractTextFromOCRSpace(
+            compressedBuffer,
+            originalName
+        );
+        console.log(ocrText);
+
+        console.log(
+            "[3] OCR.Space completed",
+            Date.now() - t0,
+            "ms"
+        );
+
+        if (!ocrText?.trim()) {
+            throw new Error("OCR returned empty text");
         }
 
-        // Call AI
-        const aiRaw = await callVisionModel(optimizedImage.base64, optimizedImage.mimeType);
+        // calling llm for raw text parsing
+        console.log("[4] Gemini parsing start");
+
+        const aiRaw = await parseInvoiceText(ocrText);
+
+        console.log(
+            "[5] Gemini parsing completed",
+            Date.now() - t0,
+            "ms"
+        );
 
         const parsed = safeParseJSON(aiRaw);
 
-        if (!parsed || !parsed.items || !Array.isArray(parsed.items)) {
-            console.error("AI Response Content:", aiRaw);
-            throw new Error("Invalid AI response format: missing items array");
+        if (
+            !parsed ||
+            !parsed.items ||
+            !Array.isArray(parsed.items)
+        ) {
+            console.error("AI RAW RESPONSE:", aiRaw);
+
+            throw new Error(
+                "Invalid AI response format: missing items array"
+            );
         }
 
         const items = parsed.items;
@@ -448,310 +479,372 @@ const autoImportProducts = async (req, res) => {
             supplier_gstin: parsed.supplier_gstin || "",
             invoice_no: parsed.invoice_no || "",
             invoice_date: parsed.invoice_date || "",
-            taxable_amount: Number(parsed.taxable_amount) || 0,
-            cgst_amount: Number(parsed.cgst_amount) || 0,
-            sgst_amount: Number(parsed.sgst_amount) || 0,
+
+            subtotal: Number(parsed.subtotal) || 0,
+
+            total_discount:
+                Number(parsed.total_discount) || 0,
+
+            taxable_amount:
+                Number(parsed.taxable_amount) || 0,
+
+            cgst_amount:
+                Number(parsed.cgst_amount) || 0,
+
+            sgst_amount:
+                Number(parsed.sgst_amount) || 0,
+
+            grand_total:
+                Number(parsed.grand_total) || 0,
         };
 
-        // ── Fire-and-forget: upload original bill to Cloudinary + create Purchase record ──
-        // We do NOT await this — a Cloudinary failure must never block the user's import.
-        let pendingPurchaseId = null;
-        try {
-            const { secure_url, public_id } = await uploadToCloudinary(
-                originalBuffer,
-                originalName,
-                originalMime
-            );
 
+        const calculatedTotal = items.reduce(
+            (sum, item) =>
+                sum + (Number(item.amount) || 0),
+            0
+        );
+
+        console.log(
+            "Invoice Total:",
+            metadata.grand_total
+        );
+
+        console.log(
+            "Calculated Total:",
+            calculatedTotal
+        );
+
+        let pendingPurchaseId = null;
+
+        try {
+            // 1. Create Purchase record immediately (fast DB insert)
             const purchase = await Purchase.create({
                 storeId: req.storeId,
-                bill_image_url: secure_url,
-                cloudinary_public_id: public_id,
+                bill_image_url: "", // will be updated async
+                cloudinary_public_id: "",
+
                 supplier_name: metadata.supplier_name,
                 supplier_gstin: metadata.supplier_gstin,
                 bill_no: metadata.invoice_no,
                 bill_date: metadata.invoice_date,
+                subtotal: metadata.subtotal,
                 taxable_amount: metadata.taxable_amount,
                 cgst_amount: metadata.cgst_amount,
                 sgst_amount: metadata.sgst_amount,
+                grand_total: metadata.grand_total,
                 items_count: items.length,
+                ocr_text: ocrText,
                 source: "auto_import",
-                status: "pending",   // becomes 'received' after confirm
+                status: "pending",
             });
 
-
             pendingPurchaseId = purchase._id.toString();
-        } catch (cloudErr) {
-            // Non-fatal — log and continue. Purchase record creation is best-effort.
-            console.warn("[AutoImport] Cloudinary/Purchase record creation failed (non-fatal):", cloudErr.message);
+
+            // 2. Fire-and-forget Cloudinary upload so user doesn't wait
+            uploadToCloudinary(
+                compressedBuffer,
+                originalName,
+                'image/jpeg'
+            ).then(async ({ secure_url, public_id }) => {
+                await Purchase.findByIdAndUpdate(pendingPurchaseId, {
+                    bill_image_url: secure_url,
+                    cloudinary_public_id: public_id
+                });
+            }).catch(cloudErr => {
+                console.warn("[Cloudinary Async Error]", cloudErr.message);
+            });
+
+        } catch (dbErr) {
+            console.warn(
+                "[Purchase DB Error]",
+                dbErr.message
+            );
         }
 
-        return res.json({
+        console.log(
+            "[6] Import completed",
+            Date.now() - t0,
+            "ms"
+        );
+
+        return res.status(200).json({
             success: true,
-            imported_products: items.length,
+
+            processing_time_ms:
+                Date.now() - t0,
+
+            imported_products:
+                items.length,
+
             metadata,
+
             items,
-            purchase_id: pendingPurchaseId,   // null if Cloudinary failed — frontend handles gracefully
+
+            purchase_id:
+                pendingPurchaseId,
         });
 
     } catch (error) {
-        console.error("FULL ERROR:", error);
-        console.error("ERROR RESPONSE:", error.response?.data);
+        console.error(
+            "[AUTO IMPORT ERROR]",
+            error
+        );
 
         return res.status(500).json({
             success: false,
             message: "Auto import failed",
-            error: error.response?.data || error.message
+            error: error.message,
         });
-    }
-}
 
+    }
+};
 
 const autoImportConfirm = async (req, res) => {
-  try {
-    const { items } = req.body;
+    try {
+        const { items } = req.body;
 
-    if (!Array.isArray(items) || !items.length) {
-      return res.status(400).json({
-        success: false,
-        message: "Invalid items format"
-      });
-    }
-
-    const cleanNumber = (val) =>
-      Number(String(val || 0).replace(/[^\d.]/g, "")) || 0;
-
-    const timestamp = Date.now();
-
-    /*
-    ===================================
-    STEP 1: MERGE DUPLICATES IN FILE
-    ===================================
-    */
-
-    const mergedItems = new Map();
-
-    for (const item of items) {
-      const medicineNameRaw =
-        item.medicine_name || item.product_name;
-
-      if (!medicineNameRaw) continue;
-
-      const normalizedName =
-        medicineNameRaw.trim().toUpperCase();
-
-      const batchNumber =
-        (item.batch_number || "").trim();
-
-      const key =
-        `${normalizedName}__${batchNumber}`;
-
-      const quantity =
-        cleanNumber(item.quantity);
-
-      if (mergedItems.has(key)) {
-        mergedItems.get(key).quantity += quantity;
-      } else {
-        mergedItems.set(key, {
-          ...item,
-          normalizedName,
-          batchNumber,
-          quantity
-        });
-      }
-    }
-
-    const finalItems = [...mergedItems.values()];
-
-    /*
-    ===================================
-    STEP 2: RESERVE BARCODE RANGE
-    ===================================
-    */
-
-    const counter = await Counter.findOneAndUpdate(
-      { storeId: req.storeId },
-      {
-        $inc: {
-          sequence: finalItems.length
+        if (!Array.isArray(items) || !items.length) {
+            return res.status(400).json({
+                success: false,
+                message: "Invalid items format"
+            });
         }
-      },
-      {
-        new: true,
-        upsert: true
-      }
-    );
 
-    const startBarcode =
-      counter.sequence - finalItems.length;
+        const cleanNumber = (val) =>
+            Number(String(val || 0).replace(/[^\d.]/g, "")) || 0;
 
-    /*
-    ===================================
-    STEP 3: FIND EXISTING PRODUCTS
-    ===================================
-    */
+        const timestamp = Date.now();
 
-    const escapeRegExpInner = (string) => string.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-    const filters = finalItems.map((item) => ({
-      storeId: req.storeId,
-      medicine_name: { $regex: new RegExp(`^${escapeRegExpInner(item.normalizedName)}$`, "i") },
-      batch_number: item.batchNumber
-    }));
+        /*
+        ===================================
+        STEP 1: MERGE DUPLICATES IN FILE
+        ===================================
+        */
 
-    const existingProducts =
-      await Inventory.find({
-        $or: filters
-      })
-        .select(
-          "_id medicine_name batch_number"
-        )
-        .lean();
+        const mergedItems = new Map();
 
-    const existingMap = new Map();
+        for (const item of items) {
+            const medicineNameRaw =
+                item.medicine_name || item.product_name;
 
-    existingProducts.forEach((product) => {
-      const nameUpper = String(product.medicine_name).toUpperCase();
-      const key =
-        `${nameUpper}__${product.batch_number || ""}`;
+            if (!medicineNameRaw) continue;
 
-      existingMap.set(key, product);
-    });
+            const normalizedName =
+                medicineNameRaw.trim().toUpperCase();
 
-    /*
-    ===================================
-    STEP 4: BUILD BULK OPERATIONS
-    ===================================
-    */
+            const batchNumber =
+                (item.batch_number || "").trim();
 
-    const bulkOps = [];
+            const key =
+                `${normalizedName}__${batchNumber}`;
 
-    let createdCount = 0;
-    let updatedCount = 0;
+            const quantity =
+                cleanNumber(item.quantity);
 
-    const importedItemsList = [];
-
-    finalItems.forEach((item, index) => {
-      const key =
-        `${item.normalizedName}__${item.batchNumber}`;
-
-      const existing =
-        existingMap.get(key);
-
-      if (existing) {
-        updatedCount++;
-
-        importedItemsList.push({
-          inventoryId: existing._id,
-          quantity: item.quantity,
-          mrp: cleanNumber(item.mrp)
-        });
-      } else {
-        createdCount++;
-      }
-
-      const shortBarcode =
-        String(startBarcode + index + 1);
-
-      const barcode =
-        `${item.normalizedName.replace(/\s/g, "")}-${timestamp}-${index}`;
-
-      bulkOps.push({
-        updateOne: {
-          filter: {
-            storeId: req.storeId,
-            medicine_name: existing ? existing.medicine_name : item.normalizedName,
-            batch_number:
-              item.batchNumber
-          },
-          update: {
-            $inc: {
-              quantity: item.quantity
-            },
-
-            $set: {
-              medicine_name: existing ? existing.medicine_name : item.normalizedName,
-
-              mrp:
-                cleanNumber(item.mrp),
-
-              expiry_date:
-                item.expiry_date || null,
-
-              cost_price:
-                item.cost_price
-                  ? cleanNumber(item.cost_price)
-                  : null,
-
-              supplier_name:
-                item.supplier_name || null,
-
-              hsn_code:
-                item.hsn_code || "",
-
-              gst:
-                item.gst
-                  ? cleanNumber(item.gst)
-                  : 0
-            },
-
-            $setOnInsert: {
-              storeId:
-                req.storeId,
-
-              barcode,
-
-              short_barcode:
-                shortBarcode,
-
-              alert_threshold:
-                item.alert_threshold || null
+            if (mergedItems.has(key)) {
+                mergedItems.get(key).quantity += quantity;
+            } else {
+                mergedItems.set(key, {
+                    ...item,
+                    normalizedName,
+                    batchNumber,
+                    quantity
+                });
             }
-          },
-          upsert: true
         }
-      });
-    });
 
-    /*
-    ===================================
-    STEP 5: SINGLE DB WRITE
-    ===================================
-    */
+        const finalItems = [...mergedItems.values()];
 
-    await Inventory.bulkWrite(
-      bulkOps,
-      {
-        ordered: false
-      }
-    );
+        /*
+        ===================================
+        STEP 2: RESERVE BARCODE RANGE
+        ===================================
+        */
 
-    return res.json({
-      success: true,
-      updated_products: updatedCount,
-      new_products: createdCount,
-      imported_items: importedItemsList
-    });
-  } catch (error) {
-    console.error(
-      "Confirm Import Error:",
-      error
-    );
+        const counter = await Counter.findOneAndUpdate(
+            { storeId: req.storeId },
+            {
+                $inc: {
+                    sequence: finalItems.length
+                }
+            },
+            {
+                new: true,
+                upsert: true
+            }
+        );
 
-    if (error.code === 11000) {
-      return res.status(409).json({
-        success: false,
-        message:
-          "Duplicate inventory record detected"
-      });
+        const startBarcode =
+            counter.sequence - finalItems.length;
+
+        /*
+        ===================================
+        STEP 3: FIND EXISTING PRODUCTS
+        ===================================
+        */
+
+        const escapeRegExpInner = (string) => string.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        const filters = finalItems.map((item) => ({
+            storeId: req.storeId,
+            medicine_name: { $regex: new RegExp(`^${escapeRegExpInner(item.normalizedName)}$`, "i") },
+            batch_number: item.batchNumber
+        }));
+
+        const existingProducts =
+            await Inventory.find({
+                $or: filters
+            })
+                .select(
+                    "_id medicine_name batch_number"
+                )
+                .lean();
+
+        const existingMap = new Map();
+
+        existingProducts.forEach((product) => {
+            const nameUpper = String(product.medicine_name).toUpperCase();
+            const key =
+                `${nameUpper}__${product.batch_number || ""}`;
+
+            existingMap.set(key, product);
+        });
+
+        /*
+        ===================================
+        STEP 4: BUILD BULK OPERATIONS
+        ===================================
+        */
+
+        const bulkOps = [];
+
+        let createdCount = 0;
+        let updatedCount = 0;
+
+        const importedItemsList = [];
+
+        finalItems.forEach((item, index) => {
+            const key =
+                `${item.normalizedName}__${item.batchNumber}`;
+
+            const existing =
+                existingMap.get(key);
+
+            if (existing) {
+                updatedCount++;
+
+                importedItemsList.push({
+                    inventoryId: existing._id,
+                    quantity: item.quantity,
+                    mrp: cleanNumber(item.mrp)
+                });
+            } else {
+                createdCount++;
+            }
+
+            const shortBarcode =
+                String(startBarcode + index + 1);
+
+            const barcode =
+                `${item.normalizedName.replace(/\s/g, "")}-${timestamp}-${index}`;
+
+            bulkOps.push({
+                updateOne: {
+                    filter: {
+                        storeId: req.storeId,
+                        medicine_name: existing ? existing.medicine_name : item.normalizedName,
+                        batch_number:
+                            item.batchNumber
+                    },
+                    update: {
+                        $inc: {
+                            quantity: item.quantity
+                        },
+
+                        $set: {
+                            medicine_name: existing ? existing.medicine_name : item.normalizedName,
+
+                            mrp:
+                                cleanNumber(item.mrp),
+
+                            expiry_date:
+                                item.expiry_date || null,
+
+                            cost_price:
+                                item.cost_price
+                                    ? cleanNumber(item.cost_price)
+                                    : null,
+
+                            supplier_name:
+                                item.supplier_name || null,
+
+                            hsn_code:
+                                item.hsn_code || "",
+
+                            gst:
+                                item.gst
+                                    ? cleanNumber(item.gst)
+                                    : 0
+                        },
+
+                        $setOnInsert: {
+                            storeId:
+                                req.storeId,
+
+                            barcode,
+
+                            short_barcode:
+                                shortBarcode,
+
+                            alert_threshold:
+                                item.alert_threshold || null
+                        }
+                    },
+                    upsert: true
+                }
+            });
+        });
+
+        /*
+        ===================================
+        STEP 5: SINGLE DB WRITE
+        ===================================
+        */
+
+        await Inventory.bulkWrite(
+            bulkOps,
+            {
+                ordered: false
+            }
+        );
+
+        return res.json({
+            success: true,
+            updated_products: updatedCount,
+            new_products: createdCount,
+            imported_items: importedItemsList
+        });
+    } catch (error) {
+        console.error(
+            "Confirm Import Error:",
+            error
+        );
+
+        if (error.code === 11000) {
+            return res.status(409).json({
+                success: false,
+                message:
+                    "Duplicate inventory record detected"
+            });
+        }
+
+        return res.status(500).json({
+            success: false,
+            message:
+                "Confirm import failed",
+            error: error.message
+        });
     }
-
-    return res.status(500).json({
-      success: false,
-      message:
-        "Confirm import failed",
-      error: error.message
-    });
-  }
 };
 // @desc    Bulk add products from master database
 // @route   POST /api/v1/product/bulk-from-master
@@ -759,7 +852,7 @@ const autoImportConfirm = async (req, res) => {
 const bulkAddFromMaster = async (req, res) => {
     try {
         const { items } = req.body;
-        
+
         if (!items || !Array.isArray(items) || items.length === 0) {
             return res.status(400).json({ success: false, message: "No items provided" });
         }
@@ -772,16 +865,16 @@ const bulkAddFromMaster = async (req, res) => {
 
         for (const item of items) {
             const normalizedName = String(item.medicine_name || "").trim().toUpperCase();
-            
+
             if (!normalizedName) {
                 skipped.push({ medicine_name: "UNKNOWN", reason: "Empty name" });
                 continue;
             }
 
             // Check if it already exists for this store
-            const existing = await Inventory.findOne({ 
-                storeId, 
-                medicine_name: normalizedName 
+            const existing = await Inventory.findOne({
+                storeId,
+                medicine_name: normalizedName
             }).collation({ locale: "en", strength: 2 });
 
             if (existing) {

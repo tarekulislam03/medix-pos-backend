@@ -75,6 +75,7 @@ export const optimizeInvoiceImage = async (imageBuffer, originalMimetype) => {
 
         return {
             base64: optimizedBuffer.toString('base64'),
+            buffer: optimizedBuffer,
             width: finalMetadata.width,
             height: finalMetadata.height,
             sizeKb: finalSizeKb,
