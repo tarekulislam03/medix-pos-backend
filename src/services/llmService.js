@@ -175,37 +175,39 @@ return completion.choices[0].message.content;
 
 };
 
-try {
-return await attemptCall();
-} catch (error) {
-console.error(
-"OpenRouter Parse Error:",
-error?.response?.data || error.message
-);
+  let attempts = 0;
+  const maxAttempts = 3;
 
-if (
-  error?.status === 429 ||
-  error?.message?.includes("rate limit")
-) {
-  await new Promise((resolve) =>
-    setTimeout(resolve, 10000)
-  );
+  while (attempts < maxAttempts) {
+    try {
+      return await attemptCall();
+    } catch (error) {
+      attempts++;
+      console.error(
+        "OpenRouter Parse Error (Attempt " + attempts + "):",
+        error?.response?.data || error.message
+      );
 
-  return await attemptCall();
-}
+      const errorMessage = (error?.message || "").toLowerCase();
+      const responseDataString = JSON.stringify(error?.response?.data || {}).toLowerCase();
 
-if (
-  error?.status === 503 ||
-  error?.message?.includes("unavailable")
-) {
-  await new Promise((resolve) =>
-    setTimeout(resolve, 5000)
-  );
+      const isRateLimit =
+        error?.status === 429 ||
+        errorMessage.includes("rate limit") ||
+        errorMessage.includes("too many request") ||
+        responseDataString.includes("too many request") ||
+        errorMessage.includes("server busy");
 
-  return await attemptCall();
-}
+      const isUnavailable =
+        error?.status === 503 || errorMessage.includes("unavailable");
 
-throw error;
+      if ((isRateLimit || isUnavailable) && attempts < maxAttempts) {
+        // Wait before retrying
+        await new Promise((resolve) => setTimeout(resolve, 5000));
+        continue;
+      }
 
-}
+      throw error;
+    }
+  }
 };
