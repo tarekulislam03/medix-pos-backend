@@ -98,10 +98,10 @@ describe('Auto Import Confirm API Integration', () => {
 
       expect(res.status).toBe(200);
       expect(res.body.success).toBe(true);
-      // It processes sequentially: first one is upserted (new_products=1)
-      // Second one finds the first one and updates it (updated_products=1)
+      // With the new bulk operations logic, duplicates in the payload are merged in memory
+      // before writing. So it counts as 1 new product and 0 updated products.
       expect(res.body.new_products).toBe(1);
-      expect(res.body.updated_products).toBe(1);
+      expect(res.body.updated_products).toBe(0);
 
       // Verify DB merged them
       const para = await Inventory.find({ medicine_name: 'PARACETAMOL 500' });

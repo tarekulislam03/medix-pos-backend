@@ -1,5 +1,8 @@
 export const safeParseJSON = (text) => {
   try {
+    if (!text || typeof text !== 'string') {
+      throw new Error('Input is null, undefined, or not a string');
+    }
     const cleaned = text
       .replace(/^```json\s*/i, '')
       .replace(/^```\s*/i, '')

@@ -6,6 +6,7 @@ import { optimizeInvoiceImage } from "../services/imageOptimizer.js";
 
 import { uploadToCloudinary } from "./purchaseController.js";
 import Purchase from "../models/purchaseModel.js";
+import Counter from "../models/counterModel.js";
 
 const escapeRegExp = (string) => {
     return string.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -507,116 +508,250 @@ const autoImportProducts = async (req, res) => {
 
 
 const autoImportConfirm = async (req, res) => {
-    try {
-        const { items } = req.body;
+  try {
+    const { items } = req.body;
 
-        if (!items || !Array.isArray(items)) {
-            return res.status(400).json({
-                success: false,
-                message: "Invalid items format"
-            });
-        }
-
-        let updatedCount = 0;
-        let createdCount = 0;
-        let importedItemsList = [];
-
-        const cleanNumber = (val) =>
-            Number(String(val || 0).replace(/[^\d.]/g, "")) || 0;
-
-        console.log("Items received:", items);
-
-        let currentShortBarcode = parseInt(await getNextShortBarcode(req.storeId), 10);
-
-        for (let i = 0; i < items.length; i++) {
-            const item = items[i];
-
-            const medicineNameRaw = item.medicine_name || item.product_name;
-            if (!medicineNameRaw) continue;
-
-            const medicineName = medicineNameRaw.trim();
-            const normalizedName = medicineName.toUpperCase();
-
-            const barcodeString =
-                `${normalizedName.replace(/\s/g, '')}-${Date.now()}-${Math.floor(Math.random() * 100000)}-${i}`;
-
-            const shortBarcodeString = currentShortBarcode.toString();
-            currentShortBarcode++;
-
-            const result = await Inventory.findOneAndUpdate(
-                {
-                    storeId: req.storeId,
-                    medicine_name: {
-                        $regex: new RegExp(`^${escapeRegExp(normalizedName)}$`, "i")
-                    },
-                    batch_number: item.batch_number || ""
-                },
-                {
-                    $inc: { quantity: cleanNumber(item.quantity) },
-                    $set: {
-                        mrp: cleanNumber(item.mrp),
-                        expiry_date: item.expiry_date || null,
-                        cost_price: item.cost_price ? cleanNumber(item.cost_price) : null,
-                        supplier_name: item.supplier_name || null,
-                        batch_number: item.batch_number || "",
-                        hsn_code: item.hsn_code || "",
-                        gst: item.gst ? cleanNumber(item.gst) : 0
-                    },
-                    $setOnInsert: {
-                        storeId: req.storeId,
-                        medicine_name: normalizedName,
-                        barcode: barcodeString,
-                        short_barcode: shortBarcodeString,
-                        alert_threshold: item.alert_threshold || null
-                    }
-                },
-                {
-                    new: true,
-                    upsert: true,
-                    includeResultMetadata: true
-                }
-            );
-
-            if (result?.lastErrorObject?.upserted) {
-                createdCount++;
-            } else {
-                updatedCount++;
-            }
-
-            // Collect the processed item to link to the Purchase record
-            if (result.value && result.value._id) {
-                importedItemsList.push({
-                    inventoryId: result.value._id,
-                    quantity: cleanNumber(item.quantity),
-                    mrp: cleanNumber(item.mrp)
-                });
-            }
-        }
-
-
-        return res.json({
-            success: true,
-            updated_products: updatedCount,
-            new_products: createdCount,
-            imported_items: importedItemsList
-        });
-
-    } catch (error) {
-        console.error("Confirm Import Error:", error);
-
-        if (error.code === 11000) {
-            return res.status(409).json({
-                success: false,
-                message: "Duplicate barcode prevented"
-            });
-        }
-
-        return res.status(500).json({
-            success: false,
-            message: "Confirm import failed",
-            error: error.message
-        });
+    if (!Array.isArray(items) || !items.length) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid items format"
+      });
     }
+
+    const cleanNumber = (val) =>
+      Number(String(val || 0).replace(/[^\d.]/g, "")) || 0;
+
+    const timestamp = Date.now();
+
+    /*
+    ===================================
+    STEP 1: MERGE DUPLICATES IN FILE
+    ===================================
+    */
+
+    const mergedItems = new Map();
+
+    for (const item of items) {
+      const medicineNameRaw =
+        item.medicine_name || item.product_name;
+
+      if (!medicineNameRaw) continue;
+
+      const normalizedName =
+        medicineNameRaw.trim().toUpperCase();
+
+      const batchNumber =
+        (item.batch_number || "").trim();
+
+      const key =
+        `${normalizedName}__${batchNumber}`;
+
+      const quantity =
+        cleanNumber(item.quantity);
+
+      if (mergedItems.has(key)) {
+        mergedItems.get(key).quantity += quantity;
+      } else {
+        mergedItems.set(key, {
+          ...item,
+          normalizedName,
+          batchNumber,
+          quantity
+        });
+      }
+    }
+
+    const finalItems = [...mergedItems.values()];
+
+    /*
+    ===================================
+    STEP 2: RESERVE BARCODE RANGE
+    ===================================
+    */
+
+    const counter = await Counter.findOneAndUpdate(
+      { storeId: req.storeId },
+      {
+        $inc: {
+          sequence: finalItems.length
+        }
+      },
+      {
+        new: true,
+        upsert: true
+      }
+    );
+
+    const startBarcode =
+      counter.sequence - finalItems.length;
+
+    /*
+    ===================================
+    STEP 3: FIND EXISTING PRODUCTS
+    ===================================
+    */
+
+    const escapeRegExpInner = (string) => string.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const filters = finalItems.map((item) => ({
+      storeId: req.storeId,
+      medicine_name: { $regex: new RegExp(`^${escapeRegExpInner(item.normalizedName)}$`, "i") },
+      batch_number: item.batchNumber
+    }));
+
+    const existingProducts =
+      await Inventory.find({
+        $or: filters
+      })
+        .select(
+          "_id medicine_name batch_number"
+        )
+        .lean();
+
+    const existingMap = new Map();
+
+    existingProducts.forEach((product) => {
+      const nameUpper = String(product.medicine_name).toUpperCase();
+      const key =
+        `${nameUpper}__${product.batch_number || ""}`;
+
+      existingMap.set(key, product);
+    });
+
+    /*
+    ===================================
+    STEP 4: BUILD BULK OPERATIONS
+    ===================================
+    */
+
+    const bulkOps = [];
+
+    let createdCount = 0;
+    let updatedCount = 0;
+
+    const importedItemsList = [];
+
+    finalItems.forEach((item, index) => {
+      const key =
+        `${item.normalizedName}__${item.batchNumber}`;
+
+      const existing =
+        existingMap.get(key);
+
+      if (existing) {
+        updatedCount++;
+
+        importedItemsList.push({
+          inventoryId: existing._id,
+          quantity: item.quantity,
+          mrp: cleanNumber(item.mrp)
+        });
+      } else {
+        createdCount++;
+      }
+
+      const shortBarcode =
+        String(startBarcode + index + 1);
+
+      const barcode =
+        `${item.normalizedName.replace(/\s/g, "")}-${timestamp}-${index}`;
+
+      bulkOps.push({
+        updateOne: {
+          filter: {
+            storeId: req.storeId,
+            medicine_name: existing ? existing.medicine_name : item.normalizedName,
+            batch_number:
+              item.batchNumber
+          },
+          update: {
+            $inc: {
+              quantity: item.quantity
+            },
+
+            $set: {
+              medicine_name: existing ? existing.medicine_name : item.normalizedName,
+
+              mrp:
+                cleanNumber(item.mrp),
+
+              expiry_date:
+                item.expiry_date || null,
+
+              cost_price:
+                item.cost_price
+                  ? cleanNumber(item.cost_price)
+                  : null,
+
+              supplier_name:
+                item.supplier_name || null,
+
+              hsn_code:
+                item.hsn_code || "",
+
+              gst:
+                item.gst
+                  ? cleanNumber(item.gst)
+                  : 0
+            },
+
+            $setOnInsert: {
+              storeId:
+                req.storeId,
+
+              barcode,
+
+              short_barcode:
+                shortBarcode,
+
+              alert_threshold:
+                item.alert_threshold || null
+            }
+          },
+          upsert: true
+        }
+      });
+    });
+
+    /*
+    ===================================
+    STEP 5: SINGLE DB WRITE
+    ===================================
+    */
+
+    await Inventory.bulkWrite(
+      bulkOps,
+      {
+        ordered: false
+      }
+    );
+
+    return res.json({
+      success: true,
+      updated_products: updatedCount,
+      new_products: createdCount,
+      imported_items: importedItemsList
+    });
+  } catch (error) {
+    console.error(
+      "Confirm Import Error:",
+      error
+    );
+
+    if (error.code === 11000) {
+      return res.status(409).json({
+        success: false,
+        message:
+          "Duplicate inventory record detected"
+      });
+    }
+
+    return res.status(500).json({
+      success: false,
+      message:
+        "Confirm import failed",
+      error: error.message
+    });
+  }
 };
 // @desc    Bulk add products from master database
 // @route   POST /api/v1/product/bulk-from-master
