@@ -4,8 +4,13 @@ import cookieParser from 'cookie-parser';
 import helmet from 'helmet';
 import xssMiddleware from './middleware/xssMiddleware.js';
 import { protect } from "./middleware/authMiddleware.js";
+import apiLogger from "./middleware/apiLogger.js";
+import analyticsRouter from "./routes/analyticsRoutes.js";
 
 const app = express();
+
+// 1. Logging middleware
+app.use(apiLogger);
 
 // 2. Security headers
 app.use(helmet());
@@ -33,6 +38,7 @@ import expenseRouter from "./routes/expenseRoutes.js";
 import masterMedicineRouter from "./routes/masterMedicineRoutes.js";
 
 // 6. Routes
+app.use("/api/v1/analytics", analyticsRouter);
 app.use("/api/v1/user", userRouter);
 app.use("/api/v1/product", protect, productRouter);
 app.use("/api/v1/billing", protect, billingRouter);
