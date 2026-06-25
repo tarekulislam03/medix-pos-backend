@@ -39,6 +39,18 @@ const settingSchema = new mongoose.Schema({
     showGstDetails: {
         type: Boolean,
         default: false
+    },
+    showDiscountPercentage: {
+        type: Boolean,
+        default: true
+    },
+    showBarcode: {
+        type: Boolean,
+        default: true
+    },
+    showQrCode: {
+        type: Boolean,
+        default: true
     }
 }, { timestamps: true });
 

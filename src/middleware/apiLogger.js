@@ -18,9 +18,9 @@ const apiLogger = (req, res, next) => {
         try {
             let storeName = null;
             if (req.storeId) {
-                const store = await Store.findById(req.storeId).select("name").lean();
+                const store = await Store.findById(req.storeId).select("storeName").lean();
                 if (store) {
-                    storeName = store.name;
+                    storeName = store.storeName;
                 }
             }
 

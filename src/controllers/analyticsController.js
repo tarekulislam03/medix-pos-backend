@@ -67,12 +67,14 @@ export const getOverview = async (req, res) => {
 export const getApiUsage = async (req, res) => {
     try {
         const topEndpoints = await ApiLog.aggregate([
+            { $sort: { timestamp: -1 } },
             {
                 $group: {
                     _id: "$endpoint",
                     hits: { $sum: 1 },
                     avgResponseTime: { $avg: "$responseTime" },
-                    lastAccessed: { $max: "$timestamp" },
+                    lastAccessed: { $first: "$timestamp" },
+                    lastAccessedStore: { $first: "$storeName" },
                     errorCount: {
                         $sum: { $cond: [{ $eq: ["$success", false] }, 1, 0] }
                     }
@@ -84,6 +86,7 @@ export const getApiUsage = async (req, res) => {
                     hits: 1,
                     avgResponseTime: { $round: ["$avgResponseTime", 0] },
                     lastAccessed: 1,
+                    lastAccessedStore: 1,
                     errorCount: 1,
                     successRate: {
                         $round: [

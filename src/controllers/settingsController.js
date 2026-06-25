@@ -29,7 +29,7 @@ export const getSettings = async (req, res) => {
  */
 export const saveSettings = async (req, res) => {
     try {
-        const { storeName, address, phone, gstNo, licenceNo, upiId, printerSize, showGstDetails } = req.body;
+        const { storeName, address, phone, gstNo, licenceNo, upiId, printerSize, showGstDetails, showDiscountPercentage, showBarcode, showQrCode } = req.body;
 
         const update = {
             storeName: storeName ?? "",
@@ -40,6 +40,9 @@ export const saveSettings = async (req, res) => {
             upiId: upiId ?? "",
             printerSize: printerSize ?? "58mm",
             showGstDetails: showGstDetails ?? false,
+            showDiscountPercentage: showDiscountPercentage ?? true,
+            showBarcode: showBarcode ?? true,
+            showQrCode: showQrCode ?? true,
         };
 
         const settings = await Setting.findOneAndUpdate(
