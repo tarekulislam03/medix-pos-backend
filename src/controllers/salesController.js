@@ -159,6 +159,9 @@ const getSaleById = async (req, res) => {
 
 // update sale by id
 const updateSaleById = async (req, res) => {
+    const session = await mongoose.startSession();
+    session.startTransaction();
+
     try {
         const { id } = req.params;
         const {
@@ -174,57 +177,74 @@ const updateSaleById = async (req, res) => {
 
         const previousDuePayment = Number(previous_due_payment);
         if (isNaN(previousDuePayment) || previousDuePayment < 0) {
+            await session.abortTransaction();
+            session.endSession();
             return res.status(400).json({ success: false, message: "Invalid previous due payment" });
         }
 
-        const existingSale = await Sales.findOne({ _id: id, storeId: req.storeId });
+        const existingSale = await Sales.findOne({ _id: id, storeId: req.storeId }).session(session);
         if (!existingSale) {
+            await session.abortTransaction();
+            session.endSession();
             return res.status(404).json({ success: false, message: "Sale not found" });
         }
 
         // Basic Validations        
         if (!items || items.length === 0) {
+            await session.abortTransaction();
+            session.endSession();
             return res.status(400).json({ success: false, message: "Cart is empty" });
         }
 
         if (!payment_method) {
+            await session.abortTransaction();
+            session.endSession();
             return res.status(400).json({ success: false, message: "Payment method is required" });
         }
 
         const paidAmount = Number(amount_paid);
 
         if (isNaN(paidAmount) || paidAmount < 0) {
+            await session.abortTransaction();
+            session.endSession();
             return res.status(400).json({ success: false, message: "Invalid amount paid" });
         }
 
         let customer = null;
         if (customer_id) {
-            customer = await Customer.findOne({ _id: customer_id, storeId: req.storeId });
+            customer = await Customer.findOne({ _id: customer_id, storeId: req.storeId }).session(session);
             if (!customer) {
+                await session.abortTransaction();
+                session.endSession();
                 return res.status(404).json({ success: false, message: "Customer not found" });
             }
         }
 
         
-        // Revert Inventory for old items
+        // Revert Inventory for old items atomically
+        const revertOps = [];
         for (const oldItem of existingSale.items) {
             const oldPid = oldItem.product_id ? String(oldItem.product_id) : '';
             if (oldPid && oldPid.length === 24 && !oldPid.startsWith('manual_')) {
-                const product = await Inventory.findOne({ _id: oldPid, storeId: req.storeId });
-                if (product) {
-                    product.quantity += oldItem.quantity;
-                    await product.save();
-                }
+                revertOps.push({
+                    updateOne: {
+                        filter: { _id: oldPid, storeId: req.storeId },
+                        update: { $inc: { quantity: oldItem.quantity } }
+                    }
+                });
             }
+        }
+        if (revertOps.length > 0) {
+            await Inventory.bulkWrite(revertOps, { session });
         }
 
         // Revert Customer Credit Balance
         if (existingSale.customer) {
-            const oldCustomer = await Customer.findOne({ _id: existingSale.customer, storeId: req.storeId });
+            const oldCustomer = await Customer.findOne({ _id: existingSale.customer, storeId: req.storeId }).session(session);
             if (oldCustomer && existingSale.due_amount > 0) {
                 oldCustomer.credit_balance -= existingSale.due_amount;
                 if (oldCustomer.credit_balance < 0) oldCustomer.credit_balance = 0;
-                await oldCustomer.save();
+                await oldCustomer.save({ session });
             }
         }
 
@@ -236,21 +256,25 @@ const updateSaleById = async (req, res) => {
         let total_cgst = 0;
         let total_sgst = 0;
         const saleItems = [];
+        const deductOps = [];
+
+        // Load current state of requested items
+        const productIds = items.map(item => item.product_id).filter(id => id && id.length === 24 && !id.startsWith('manual_'));
+        const products = await Inventory.find({ _id: { $in: productIds }, storeId: req.storeId }).session(session).lean();
+        const productMap = new Map(products.map(p => [String(p._id), p]));
 
         for (const item of items) {
-            // Find product, handling potential missing or invalid product_ids safely
             let product = null;
             const pid = item.product_id ? String(item.product_id) : '';
             const itemQty = Number(item.quantity) || 0;
 
             if (pid && pid.length === 24 && !pid.startsWith('manual_')) {
-                product = await Inventory.findOne({ _id: pid, storeId: req.storeId });
+                product = productMap.get(pid);
             }
 
             // If product is not found (e.g., manual item or deleted item), use item data as fallback
             if (!product) {
-                // Use a valid ObjectId if the pid looks like one, otherwise generate new one
-                const fallbackId = (pid && pid.length === 24) ? pid : new (await import('mongoose')).default.Types.ObjectId();
+                const fallbackId = (pid && pid.length === 24) ? pid : new mongoose.Types.ObjectId();
                 product = {
                     _id: fallbackId,
                     medicine_name: item.medicine_name || 'Unknown Item',
@@ -264,32 +288,17 @@ const updateSaleById = async (req, res) => {
                 };
             }
 
-            if (product.quantity < itemQty) {
-                 for (const oldItem of existingSale.items) {
-                    const rPid = oldItem.product_id ? String(oldItem.product_id) : '';
-                    if (rPid && rPid.length === 24 && !rPid.startsWith('manual_')) {
-                        const prod = await Inventory.findOne({ _id: rPid, storeId: req.storeId });
-                        if (prod) { prod.quantity -= oldItem.quantity; await prod.save(); }
-                    }
-                }
-                return res.status(400).json({ success: false, message: `Insufficient stock for ${product.medicine_name}` });
-            }
-
+            // Note: Since we bulk incremented earlier in the same transaction, product.quantity here does NOT reflect the reverted stock if it was an old item.
+            // But the database bulkWrite atomic lock below WILL account for it safely.
             const discountPercent = Number(item.discount_percent || 0);
 
             if (discountPercent < 0 || discountPercent > 100) {
-                 for (const oldItem of existingSale.items) {
-                    const rPid2 = oldItem.product_id ? String(oldItem.product_id) : '';
-                    if (rPid2 && rPid2.length === 24 && !rPid2.startsWith('manual_')) {
-                        const prod = await Inventory.findOne({ _id: rPid2, storeId: req.storeId });
-                        if (prod) { prod.quantity -= oldItem.quantity; await prod.save(); }
-                    }
-                }
+                await session.abortTransaction();
+                session.endSession();
                 return res.status(400).json({ success: false, message: "Discount must be between 0 and 100" });
             }
 
             let itemSubtotal = 0;
-            // Handle loose sales correctly
             if (item.is_loose_sale) {
                 itemSubtotal = Number(item.loose_total_price || 0);
             } else {
@@ -298,20 +307,18 @@ const updateSaleById = async (req, res) => {
             const discountAmount = Number(((itemSubtotal * discountPercent) / 100).toFixed(2));
             const itemTotal = Number((itemSubtotal - discountAmount).toFixed(2));
 
-            // GSt calculation
+            // GST calculation
             const gstPercent = Number(product.gst ?? 0);
-            let taxableAmount = itemTotal; // when gst is 0
+            let taxableAmount = itemTotal;
             let cgstAmount = 0;
             let sgstAmount = 0;
 
-            // validations
             if (gstPercent < 0 || gstPercent > 28) {
-                return res.status(400).json({
-                    message: "Invalid GST percentage"
-                });
+                await session.abortTransaction();
+                session.endSession();
+                return res.status(400).json({ message: "Invalid GST percentage" });
             }
 
-            // Calculation
             if (gstPercent > 0) {
                 const totalGst = Number(((itemTotal * gstPercent) / (100 + gstPercent)).toFixed(2));
                 taxableAmount = Number((itemTotal - totalGst).toFixed(2));
@@ -319,16 +326,16 @@ const updateSaleById = async (req, res) => {
                 sgstAmount = Number((totalGst - cgstAmount).toFixed(2));
             }
 
-            subtotal = subtotal + itemSubtotal;
-            total_discount = total_discount + discountAmount;
+            subtotal += itemSubtotal;
+            total_discount += discountAmount;
             
             const itemCostPrice = Number(product.cost_price || product.mrp || 0);
             const itemProfit = itemTotal - (itemCostPrice * itemQty);
             total_profit += itemProfit;
             
-            total_taxable = total_taxable + taxableAmount;
-            total_cgst = total_cgst + cgstAmount;
-            total_sgst = total_sgst + sgstAmount;
+            total_taxable += taxableAmount;
+            total_cgst += cgstAmount;
+            total_sgst += sgstAmount;
 
             saleItems.push({
                 product_id: product._id,
@@ -346,11 +353,28 @@ const updateSaleById = async (req, res) => {
                 sgst_amount: sgstAmount
             });
 
-            // Deduct stock only for real inventory products
+            // Deduct stock only for real inventory products, ATOMICALLY
             if (!product._isManual) {
-                product.quantity -= itemQty;
-                if (product.quantity < 0) product.quantity = 0;
-                await product.save();
+                deductOps.push({
+                    updateOne: {
+                        filter: {
+                            _id: product._id,
+                            storeId: req.storeId,
+                            quantity: { $gte: itemQty } // Strict atomic lock
+                        },
+                        update: { $inc: { quantity: -itemQty } }
+                    }
+                });
+            }
+        }
+
+        // Apply Deductions Atomically
+        if (deductOps.length > 0) {
+            const bulkResult = await Inventory.bulkWrite(deductOps, { session });
+            if (bulkResult.modifiedCount !== deductOps.length) {
+                await session.abortTransaction();
+                session.endSession();
+                return res.status(409).json({ success: false, message: "Insufficient stock or concurrent checkout detected for one or more items." });
             }
         }
 
@@ -362,19 +386,23 @@ const updateSaleById = async (req, res) => {
 
         const medicineTotalAfterDiscount = Number((subtotal - total_discount).toFixed(2));
 
-        // Doctor fee — not discounted
+        // Doctor fee
         const doctorFee = Number(Number(doctor_fee || 0).toFixed(2));
         if (isNaN(doctorFee) || doctorFee < 0) {
+            await session.abortTransaction();
+            session.endSession();
             return res.status(400).json({ success: false, message: "Invalid doctor fee" });
         }
 
-        // OTC items — not discounted
+        // OTC items
         const otcList = Array.isArray(otc_items) ? otc_items : [];
         let otcTotal = 0;
         const sanitizedOtcItems = [];
         for (const otcItem of otcList) {
             const price = Number(otcItem.price || 0);
             if (!otcItem.name || isNaN(price) || price < 0) {
+                await session.abortTransaction();
+                session.endSession();
                 return res.status(400).json({ success: false, message: `Invalid OTC item: ${otcItem.name || 'unknown'}` });
             }
             otcTotal += price;
@@ -383,12 +411,9 @@ const updateSaleById = async (req, res) => {
         otcTotal = Number(otcTotal.toFixed(2));
 
         const grandTotal = Number((medicineTotalAfterDiscount + doctorFee + otcTotal).toFixed(2));
-
         const remainingForBill = paidAmount - previousDuePayment;
         let dueAmount = Number((grandTotal - remainingForBill).toFixed(2));
-        if (dueAmount < 0) {
-            dueAmount = 0;
-        }
+        if (dueAmount < 0) dueAmount = 0;
 
         // Update Sale Document
         existingSale.customer = customer ? customer._id : null;
@@ -415,15 +440,18 @@ const updateSaleById = async (req, res) => {
         existingSale.due_amount = dueAmount;
         existingSale.payment_method = payment_method;
 
-        await existingSale.save();
+        await existingSale.save({ session });
 
         // Update New Customer Credit
         if (customer) {
            customer.credit_balance -= previousDuePayment;
            if (dueAmount > 0) customer.credit_balance += dueAmount;
            if (customer.credit_balance < 0) customer.credit_balance = 0;
-           await customer.save();
+           await customer.save({ session });
         }
+
+        await session.commitTransaction();
+        session.endSession();
 
         return res.status(200).json({
             success: true,
@@ -434,6 +462,8 @@ const updateSaleById = async (req, res) => {
         });
 
     } catch (error) {
+        await session.abortTransaction();
+        session.endSession();
         console.error('updateSaleById error:', error.message, error.stack);
         res.status(500).json({ success: false, message: "Failed to update sale", error: error.message });
     }
@@ -465,35 +495,51 @@ const searchSaleByInvoice = async (req, res) => {
 
 // delete sales by id
 const deleteSaleById = async (req, res) => {
+    const session = await mongoose.startSession();
+    session.startTransaction();
+
     try {
         const { id } = req.params;
 
-        const sale = await Sales.findOne({ _id: id, storeId: req.storeId });
+        const sale = await Sales.findOne({ _id: id, storeId: req.storeId }).session(session);
         if (!sale) {
+            await session.abortTransaction();
+            session.endSession();
             return res.status(404).json({ success: false, message: "Sale not found" });
         }
 
-        // restore stock for each item sold
+        // restore stock for each item sold atomically
+        const revertOps = [];
         for (const item of sale.items) {
-            const product = await Inventory.findOne({ _id: item.product_id, storeId: req.storeId });
-            if (product) {
-                product.quantity += item.quantity;
-                await product.save();
+            const pid = item.product_id ? String(item.product_id) : '';
+            if (pid && pid.length === 24 && !pid.startsWith('manual_')) {
+                revertOps.push({
+                    updateOne: {
+                        filter: { _id: pid, storeId: req.storeId },
+                        update: { $inc: { quantity: item.quantity } }
+                    }
+                });
             }
+        }
+        if (revertOps.length > 0) {
+            await Inventory.bulkWrite(revertOps, { session });
         }
 
         // Revert Customer Credit Balance
         if (sale.customer && sale.due_amount > 0) {
-            const customer = await Customer.findOne({ _id: sale.customer, storeId: req.storeId });
+            const customer = await Customer.findOne({ _id: sale.customer, storeId: req.storeId }).session(session);
             if (customer) {
                 customer.credit_balance -= sale.due_amount;
                 if (customer.credit_balance < 0) customer.credit_balance = 0;
-                await customer.save();
+                await customer.save({ session });
             }
         }
 
         // Delete the sale document
-        await Sales.deleteOne({ _id: id, storeId: req.storeId });
+        await Sales.deleteOne({ _id: id, storeId: req.storeId }, { session });
+
+        await session.commitTransaction();
+        session.endSession();
 
         return res.status(200).json({
             success: true,
@@ -501,7 +547,9 @@ const deleteSaleById = async (req, res) => {
         });
 
     } catch (error) {
-        console.error(error);
+        await session.abortTransaction();
+        session.endSession();
+        console.error('deleteSaleById error:', error);
         res.status(500).json({ success: false, message: "Failed to delete sale" });
     }
 };

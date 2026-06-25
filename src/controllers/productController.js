@@ -1,4 +1,5 @@
 import bwipjs from "bwip-js";
+import crypto from "crypto";
 import Inventory from "../models/productModel.js";
 import { parseInvoiceText } from "../services/llmService.js";
 import { safeParseJSON } from "../services/jsonParser.js";
@@ -116,7 +117,7 @@ const createProduct = async (req, res) => {
         } else {
 
             const barcodeString =
-                `${normalizedName.replace(/\s/g, '')}-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
+                `${normalizedName.replace(/\s/g, '')}-${Date.now()}-${crypto.randomUUID().split('-')[0]}`;
 
             const shortBarcodeString = await getNextShortBarcode(req.storeId);
 
@@ -219,7 +220,7 @@ const updateProduct = async (req, res) => {
         const update = await Inventory.findOneAndUpdate(
             { _id: req.params.id, storeId: req.storeId },
             req.body,
-            { new: true }
+            { returnDocument: "after" }
         );
 
         if (!update) {
@@ -451,6 +452,7 @@ const autoImportProducts = async (req, res) => {
         console.log("[4] Gemini parsing start");
 
         const aiRaw = await parseInvoiceText(ocrText);
+        console.log(aiRaw)
 
         console.log(
             "[5] Gemini parsing completed",
@@ -670,7 +672,7 @@ const autoImportConfirm = async (req, res) => {
                 }
             },
             {
-                new: true,
+                returnDocument: "after",
                 upsert: true
             }
         );
@@ -746,7 +748,7 @@ const autoImportConfirm = async (req, res) => {
                 String(startBarcode + index + 1);
 
             const barcode =
-                `${item.normalizedName.replace(/\s/g, "")}-${timestamp}-${index}`;
+                `${item.normalizedName.replace(/\s/g, "")}-${timestamp}-${crypto.randomUUID().split('-')[0]}`;
 
             bulkOps.push({
                 updateOne: {
@@ -913,7 +915,7 @@ const bulkAddFromMaster = async (req, res) => {
                 continue;
             }
 
-            const barcodeString = `${normalizedName.replace(/\s/g, '')}-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
+            const barcodeString = `${normalizedName.replace(/\s/g, '')}-${Date.now()}-${crypto.randomUUID().split('-')[0]}`;
             const shortBarcodeString = currentShortBarcode.toString();
             currentShortBarcode++;
 

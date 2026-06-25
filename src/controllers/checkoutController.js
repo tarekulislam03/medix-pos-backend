@@ -1,8 +1,12 @@
+import mongoose from "mongoose";
 import Inventory from "../models/productModel.js";
 import Sales from "../models/salesModel.js";
 import Customer from "../models/customerModel.js";
 
 const checkout = async (req, res) => {
+    const session = await mongoose.startSession();
+    session.startTransaction();
+
     try {
         const {
             customer_id,
@@ -17,10 +21,14 @@ const checkout = async (req, res) => {
 
         // Basic Validations        
         if (!items || items.length === 0) {
+            await session.abortTransaction();
+            session.endSession();
             return res.status(400).json({ message: "Cart is empty" });
         }
 
         if (!payment_method) {
+            await session.abortTransaction();
+            session.endSession();
             return res.status(400).json({
                 message: "Payment method is required"
             });
@@ -30,26 +38,31 @@ const checkout = async (req, res) => {
         const previousDuePayment = Number(previous_due_payment);
 
         if (isNaN(paidAmount) || paidAmount < 0) {
+            await session.abortTransaction();
+            session.endSession();
             return res.status(400).json({
                 message: "Invalid amount paid"
             });
         }
 
         if (isNaN(previousDuePayment) || previousDuePayment < 0) {
+            await session.abortTransaction();
+            session.endSession();
             return res.status(400).json({
                 message: "Invalid previous due payment"
             });
         }
-
 
         // Customer Validation
         let customer = null;
         let previousCredit = 0;
 
         if (customer_id) {
-            customer = await Customer.findOne({ _id: customer_id, storeId: req.storeId });
+            customer = await Customer.findOne({ _id: customer_id, storeId: req.storeId }).session(session);
 
             if (!customer) {
+                await session.abortTransaction();
+                session.endSession();
                 return res.status(404).json({
                     message: "Customer not found"
                 });
@@ -60,6 +73,8 @@ const checkout = async (req, res) => {
 
         // Cannot pay more previous due than exists
         if (previousDuePayment > previousCredit) {
+            await session.abortTransaction();
+            session.endSession();
             return res.status(400).json({
                 message: "Previous due payment exceeds credit balance"
             });
@@ -67,6 +82,8 @@ const checkout = async (req, res) => {
 
         // Cannot allocate more previous due than total paid
         if (previousDuePayment > paidAmount) {
+            await session.abortTransaction();
+            session.endSession();
             return res.status(400).json({
                 message: "Previous due payment cannot exceed total paid amount"
             });
@@ -88,7 +105,7 @@ const checkout = async (req, res) => {
         const products = await Inventory.find({
             _id: { $in: productIds },
             storeId: req.storeId
-        }).lean();
+        }).session(session).lean();
 
         const productMap = new Map(
             products.map(p => [String(p._id), p])
@@ -113,8 +130,10 @@ const checkout = async (req, res) => {
                 };
             }
 
-            // Stock aviailability check
+            // Stock availability check (in memory before strict DB check)
             if (product.quantity < item.quantity) {
+                await session.abortTransaction();
+                session.endSession();
                 return res.status(400).json({
                     message: `Insufficient stock for ${product.medicine_name}`
                 });
@@ -123,6 +142,8 @@ const checkout = async (req, res) => {
             const discountPercent = Number(item.discount_percent ?? 0);
 
             if (discountPercent < 0 || discountPercent > 100) {
+                await session.abortTransaction();
+                session.endSession();
                 return res.status(400).json({
                     message: "Discount must be between 0 and 100"
                 });
@@ -151,6 +172,8 @@ const checkout = async (req, res) => {
 
             // Validation
             if (gstPercent < 0 || gstPercent > 28) {
+                await session.abortTransaction();
+                session.endSession();
                 return res.status(400).json({
                     message: "Invalid GST percentage"
                 });
@@ -194,13 +217,14 @@ const checkout = async (req, res) => {
                 hsn_code: product.hsn_code || ""
             });
 
-            // Deduct stock only for real products
+            // Deduct stock only for real products, ATOMICALLY
             if (!String(product._id).startsWith('manual_')) {
                 stockOperations.push({
                     updateOne: {
                         filter: {
                             _id: product._id,
-                            storeId: req.storeId
+                            storeId: req.storeId,
+                            quantity: { $gte: item.quantity } // Strict atomic lock
                         },
                         update: {
                             $inc: {
@@ -211,24 +235,27 @@ const checkout = async (req, res) => {
                 });
             }
         }
+
+        // Apply Stock Operations
         if (stockOperations.length > 0) {
-            await Inventory.bulkWrite(stockOperations);
+            const bulkResult = await Inventory.bulkWrite(stockOperations, { session });
+            if (bulkResult.modifiedCount !== stockOperations.length) {
+                // If the modified count doesn't match the items we tried to deduct, a concurrent transaction stole the stock!
+                await session.abortTransaction();
+                session.endSession();
+                return res.status(409).json({ 
+                    message: "Insufficient stock or concurrent checkout detected for one or more items. Please review your cart and try again." 
+                });
+            }
         }
         
-        // Clamp any negative stock to 0
-        await Inventory.updateMany(
-            { _id: { $in: productIds }, storeId: req.storeId, quantity: { $lt: 0 } },
-            { $set: { quantity: 0 } }
-        );
-
-        // Only remove zero-stock items that HAVE a batch number (batch-specific products).
-        // Products without batch number stay in inventory for restocking.
+        // Remove zero-stock items that HAVE a batch number (batch-specific products).
         await Inventory.deleteMany({
             _id: { $in: productIds },
             storeId: req.storeId,
             quantity: { $lte: 0 },
             batch_number: { $exists: true, $ne: "" }
-        });
+        }, { session });
 
         subtotal = Number(subtotal.toFixed(2));
         total_discount = Number(total_discount.toFixed(2));
@@ -241,6 +268,8 @@ const checkout = async (req, res) => {
         // Doctor fee — not discounted
         const doctorFee = Number(Number(doctor_fee ?? 0).toFixed(2));
         if (isNaN(doctorFee) || doctorFee < 0) {
+            await session.abortTransaction();
+            session.endSession();
             return res.status(400).json({ message: "Invalid doctor fee" });
         }
 
@@ -251,6 +280,8 @@ const checkout = async (req, res) => {
         for (const otcItem of otcList) {
             const price = Number(otcItem.price ?? 0);
             if (!otcItem.name || isNaN(price) || price < 0) {
+                await session.abortTransaction();
+                session.endSession();
                 return res.status(400).json({ message: `Invalid OTC item: ${otcItem.name || 'unknown'}` });
             }
             otcTotal += price;
@@ -259,12 +290,8 @@ const checkout = async (req, res) => {
         otcTotal = Number(otcTotal.toFixed(2));
 
         const grandTotal = Number((medicineTotalAfterDiscount + doctorFee + otcTotal).toFixed(2));
-
         const remainingForBill = grandTotal - paidAmount;
-
-        let dueAmount = Number(
-            (remainingForBill + previousDuePayment).toFixed(2)
-        );
+        let dueAmount = Number((remainingForBill + previousDuePayment).toFixed(2));
 
         // Prevent negative due
         if (dueAmount < 0) {
@@ -274,7 +301,7 @@ const checkout = async (req, res) => {
         const invoiceNumber = `INV-${Date.now()}`;
 
         // Create Sale
-        const sale = await Sales.create({
+        const sale = new Sales({
             invoice_number: invoiceNumber,
             customer: customer ? customer._id : null,
             customer_name: customer ? customer.name : (req.body.customer_name_fallback || null),
@@ -296,36 +323,35 @@ const checkout = async (req, res) => {
             payment_method,
             storeId: req.storeId
         });
+        
+        await sale.save({ session });
 
         // Update Customer Credit
         if (customer) {
-            // Remove paid previous due
             customer.credit_balance -= previousDuePayment;
-            // Add new due
             if (dueAmount > 0) {
                 customer.credit_balance += dueAmount;
             }
-            // Prevent negative balance edge case
             if (customer.credit_balance < 0) {
                 customer.credit_balance = 0;
             }
 
-            await customer.save();
+            await customer.save({ session });
         }
 
+        await session.commitTransaction();
+        session.endSession();
+
         return res.status(200).json({
-            message:
-                dueAmount > 0
-                    ? "Billing successful. Due recorded."
-                    : "Billing successful",
+            message: dueAmount > 0 ? "Billing successful. Due recorded." : "Billing successful",
             invoice: sale,
             due_amount: dueAmount,
-            customer_credit_balance: customer
-                ? customer.credit_balance
-                : null
+            customer_credit_balance: customer ? customer.credit_balance : null
         });
 
     } catch (error) {
+        await session.abortTransaction();
+        session.endSession();
         return res.status(500).json({
             message: error.message
         });

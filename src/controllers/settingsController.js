@@ -48,7 +48,7 @@ export const saveSettings = async (req, res) => {
         const settings = await Setting.findOneAndUpdate(
             { storeId: req.storeId },
             { $set: update },
-            { upsert: true, new: true, runValidators: true }
+            { upsert: true, returnDocument: "after", runValidators: true }
         ).lean();
 
         const { _id, storeId, __v, createdAt, updatedAt, ...data } = settings;

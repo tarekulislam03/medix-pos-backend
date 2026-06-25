@@ -10,7 +10,7 @@ export const extractTextFromOCRSpace = async (buffer, fileName) => {
         formData.append("language", "eng");
         formData.append("isTable", "true");
         formData.append("scale", "true");
-        formData.append("OCREngine", "3");
+        formData.append("OCREngine", "2");
 
         const response = await axios.post(
             "https://api.ocr.space/parse/image",

@@ -153,7 +153,7 @@ describe('Edit Sale API Integration', () => {
       .set('Authorization', `Bearer ${token}`)
       .send(editPayload);
 
-    expect(res.status).toBe(400);
+    expect(res.status).toBe(409);
     expect(res.body.message).toMatch(/Insufficient stock/i);
 
     // Original stock for product 4 should be unchanged

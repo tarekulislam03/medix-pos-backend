@@ -93,7 +93,7 @@ const finalizePurchase = async (req, res) => {
                     imported_items: imported_items || [],
                 },
             },
-            { new: true }
+            { returnDocument: "after" }
         );
 
         if (!purchase) {
