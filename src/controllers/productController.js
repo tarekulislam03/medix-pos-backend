@@ -16,14 +16,7 @@ const escapeRegExp = (string) => {
 };
 
 const getNextShortBarcode = async (storeId) => {
-    const lastProduct = await Inventory.findOne({ storeId, short_barcode: { $exists: true } })
-        .sort({ short_barcode: -1 })
-        .collation({ locale: "en_US", numericOrdering: true });
-
-    if (lastProduct && lastProduct.short_barcode && !isNaN(lastProduct.short_barcode)) {
-        return (parseInt(lastProduct.short_barcode, 10) + 1).toString();
-    }
-    return "100001";
+    return Math.floor(10000000 + Math.random() * 90000000).toString();
 };
 
 // Create product
@@ -601,25 +594,10 @@ const autoImportConfirm = async (req, res) => {
 
         /*
         ===================================
-        STEP 2: RESERVE BARCODE RANGE
+        STEP 2: BARCODE GENERATION
         ===================================
         */
-
-        const counter = await Counter.findOneAndUpdate(
-            { storeId: req.storeId },
-            {
-                $inc: {
-                    sequence: finalItems.length
-                }
-            },
-            {
-                returnDocument: "after",
-                upsert: true
-            }
-        );
-
-        const startBarcode =
-            counter.sequence - finalItems.length;
+        // Generating random short barcodes directly per item
 
         /*
         ===================================
@@ -686,7 +664,7 @@ const autoImportConfirm = async (req, res) => {
             }
 
             const shortBarcode =
-                String(startBarcode + index + 1);
+                Math.floor(10000000 + Math.random() * 90000000).toString();
 
             const barcode =
                 `${item.normalizedName.replace(/\s/g, "")}-${timestamp}-${crypto.randomUUID().split('-')[0]}`;
@@ -804,7 +782,7 @@ const bulkAddFromMaster = async (req, res) => {
         const added = [];
         const skipped = [];
 
-        let currentShortBarcode = parseInt(await getNextShortBarcode(storeId), 10);
+        // short barcodes will be generated randomly per item
 
         for (const item of items) {
             const normalizedName = String(item.medicine_name || "").trim().toUpperCase();
@@ -857,8 +835,7 @@ const bulkAddFromMaster = async (req, res) => {
             }
 
             const barcodeString = `${normalizedName.replace(/\s/g, '')}-${Date.now()}-${crypto.randomUUID().split('-')[0]}`;
-            const shortBarcodeString = currentShortBarcode.toString();
-            currentShortBarcode++;
+            const shortBarcodeString = Math.floor(10000000 + Math.random() * 90000000).toString();
 
             const batchNumber = 'B' + Math.random().toString(36).substring(2, 8).toUpperCase();
 
