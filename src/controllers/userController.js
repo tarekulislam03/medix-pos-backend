@@ -127,4 +127,14 @@ const logoutUser = async (req, res) => {
   }
 };
 
-export { registerUser, loginUser, logoutUser };
+// get all stores for admin operations
+const getStores = async (req, res) => {
+  try {
+    const stores = await Store.find({}, "storeName _id contactNumber");
+    res.json({ success: true, data: stores });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+};
+
+export { registerUser, loginUser, logoutUser, getStores };

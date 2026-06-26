@@ -155,11 +155,14 @@ const createManualPurchase = async (req, res) => {
             bill_date, 
             items, 
             taxable_amount, 
-            cgst_amount, 
-            sgst_amount, 
+            cgst_amount,
+            sgst_amount,
             total_amount,
-            notes 
+            notes,
+            storeId
         } = req.body;
+
+        const storeIdToUse = storeId || req.storeId;
 
         if (!items || items.length === 0) {
             return res.status(400).json({ success: false, message: "Purchase must contain at least one item." });
@@ -167,15 +170,32 @@ const createManualPurchase = async (req, res) => {
 
         const imported_items = [];
         
-        for (const item of items) {
+        for (let item of items) {
             const normalizedName = (item.medicine_name || "").trim().toUpperCase();
             if (!normalizedName) continue;
             
             const cleanNumber = (val) => Number(String(val || 0).replace(/[^\d.]/g, "")) || 0;
             const batchNum = item.batch_number || "";
             
+            // Format expiry_date to last day of the month if it's YYYY-MM or MM/YY
+            let exp = item.expiry_date;
+            if (exp && typeof exp === 'string') {
+                if (/^\d{4}-\d{2}$/.test(exp)) {
+                    // YYYY-MM
+                    const [year, month] = exp.split('-');
+                    const lastDay = new Date(parseInt(year), parseInt(month), 0).getDate();
+                    item.expiry_date = `${year}-${month}-${String(lastDay).padStart(2, '0')}`;
+                } else if (/^\d{2}\/\d{2}$/.test(exp)) {
+                    // MM/YY
+                    const [month, yy] = exp.split('/');
+                    const year = `20${yy}`;
+                    const lastDay = new Date(parseInt(year), parseInt(month), 0).getDate();
+                    item.expiry_date = `${year}-${month}-${String(lastDay).padStart(2, '0')}`;
+                }
+            }
+            
             let product = await Inventory.findOne({
-                storeId: req.storeId,
+                storeId: storeIdToUse,
                 medicine_name: {
                     $regex: new RegExp(`^${escapeRegExp(normalizedName)}$`, "i")
                 },
@@ -205,7 +225,7 @@ const createManualPurchase = async (req, res) => {
                 });
             } else {
                 // Create new inventory
-                const short_barcode = await getNextShortBarcode(req.storeId);
+                const short_barcode = await getNextShortBarcode(storeIdToUse);
                 const newProduct = await Inventory.create({
                     medicine_name: normalizedName,
                     mrp: cleanNumber(item.mrp),
@@ -217,7 +237,7 @@ const createManualPurchase = async (req, res) => {
                     hsn_code: item.hsn_code || "",
                     gst: item.gst ? cleanNumber(item.gst) : 0,
                     short_barcode: short_barcode,
-                    storeId: req.storeId
+                    storeId: storeIdToUse
                 });
                 
                 imported_items.push({
@@ -229,7 +249,7 @@ const createManualPurchase = async (req, res) => {
         }
 
         const purchase = await Purchase.create({
-            storeId: req.storeId,
+            storeId: storeIdToUse,
             supplier_name: supplier_name || "",
             supplier_gstin: supplier_gstin || "",
             bill_no: bill_no || "",

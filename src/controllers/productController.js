@@ -1,7 +1,7 @@
 import bwipjs from "bwip-js";
 import crypto from "crypto";
 import Inventory from "../models/productModel.js";
-import { parseInvoiceText } from "../services/llmService.js";
+import { extractInvoiceFromPython } from "../services/llmService.js";
 import { safeParseJSON } from "../services/jsonParser.js";
 import { optimizeInvoiceImage } from "../services/imageOptimizer.js";
 import { normalizeImage } from "../middleware/imageNormalizationMiddleware.js";
@@ -408,7 +408,7 @@ const getLooseMedicinePrice = async (req, res) => {
     }
 };
 
-// auto product import from bill image using AI
+// auto product import from bill image using Python OCR pipeline
 const autoImportProducts = async (req, res) => {
     const t0 = Date.now();
 
@@ -430,92 +430,43 @@ const autoImportProducts = async (req, res) => {
         const { buffer: compressedBuffer } = await optimizeInvoiceImage(originalBuffer, originalMime);
         console.log("[1.6] Image compression end", Date.now() - t0, "ms");
 
-        console.log("[2] OCR.Space start");
-        // calling text extractor middleware
-        const ocrText = await extractTextFromOCRSpace(
-            compressedBuffer,
-            originalName
-        );
-        console.log(ocrText);
+        console.log("[2] Python OCR Pipeline start");
+        
+        // Call Python backend
+        const parsed = await extractInvoiceFromPython(compressedBuffer, originalName, originalMime);
 
-        console.log(
-            "[3] OCR.Space completed",
-            Date.now() - t0,
-            "ms"
-        );
+        console.log("[3] Python OCR Pipeline completed", Date.now() - t0, "ms");
 
-        if (!ocrText?.trim()) {
-            throw new Error("OCR returned empty text");
-        }
-
-        // calling llm for raw text parsing
-        console.log("[4] Gemini parsing start");
-
-        const aiRaw = await parseInvoiceText(ocrText);
-        console.log(aiRaw)
-
-        console.log(
-            "[5] Gemini parsing completed",
-            Date.now() - t0,
-            "ms"
-        );
-
-        const parsed = safeParseJSON(aiRaw);
-
-        if (
-            !parsed ||
-            !parsed.items ||
-            !Array.isArray(parsed.items)
-        ) {
-            console.error("AI RAW RESPONSE:", aiRaw);
-
-            throw new Error(
-                "Invalid AI response format: missing items array"
-            );
+        if (!parsed || !parsed.items || !Array.isArray(parsed.items)) {
+            console.error("PIPELINE RESPONSE:", parsed);
+            throw new Error("Invalid pipeline response format: missing items array");
         }
 
         const items = parsed.items;
+        const invMeta = parsed.invoice || {};
+        const storeMeta = parsed.store || {};
+        const totalsMeta = parsed.totals || {};
 
         const metadata = {
-            supplier_name: parsed.supplier_name || "",
-            supplier_gstin: parsed.supplier_gstin || "",
-            invoice_no: parsed.invoice_no || "",
-            invoice_date: parsed.invoice_date || "",
+            supplier_name: storeMeta.name || "",
+            supplier_gstin: storeMeta.gstin || "",
+            invoice_no: invMeta.number || "",
+            invoice_date: invMeta.date || "",
 
-            subtotal: Number(parsed.subtotal) || 0,
-
-            total_discount:
-                Number(parsed.total_discount) || 0,
-
-            taxable_amount:
-                Number(parsed.taxable_amount) || 0,
-
-            cgst_amount:
-                Number(parsed.cgst_amount) || 0,
-
-            sgst_amount:
-                Number(parsed.sgst_amount) || 0,
-
-            grand_total:
-                Number(parsed.grand_total) || 0,
+            subtotal: Number(totalsMeta.subtotal) || 0,
+            taxable_amount: Number(totalsMeta.taxable_amount) || 0,
+            cgst_amount: Number(totalsMeta.cgst_amount) || 0,
+            sgst_amount: Number(totalsMeta.sgst_amount) || 0,
+            grand_total: Number(totalsMeta.grand_total) || 0,
         };
 
-
         const calculatedTotal = items.reduce(
-            (sum, item) =>
-                sum + (Number(item.amount) || 0),
+            (sum, item) => sum + (Number(item.amount) || 0),
             0
         );
 
-        console.log(
-            "Invoice Total:",
-            metadata.grand_total
-        );
-
-        console.log(
-            "Calculated Total:",
-            calculatedTotal
-        );
+        console.log("Invoice Total:", metadata.grand_total);
+        console.log("Calculated Total:", calculatedTotal);
 
         let pendingPurchaseId = null;
 
@@ -536,7 +487,12 @@ const autoImportProducts = async (req, res) => {
                 sgst_amount: metadata.sgst_amount,
                 grand_total: metadata.grand_total,
                 items_count: items.length,
-                ocr_text: ocrText,
+                
+                // OCR Metadata
+                confidence_score: parsed.confidence_score || 0.0,
+                needs_manual_review: parsed.needs_manual_review || false,
+                validation_warnings: parsed.validation_warnings || [],
+
                 source: "auto_import",
                 status: "pending",
             });
@@ -558,47 +514,32 @@ const autoImportProducts = async (req, res) => {
             });
 
         } catch (dbErr) {
-            console.warn(
-                "[Purchase DB Error]",
-                dbErr.message
-            );
+            console.warn("[Purchase DB Error]", dbErr.message);
         }
 
-        console.log(
-            "[6] Import completed",
-            Date.now() - t0,
-            "ms"
-        );
+        console.log("[6] Import completed", Date.now() - t0, "ms");
 
         return res.status(200).json({
             success: true,
-
-            processing_time_ms:
-                Date.now() - t0,
-
-            imported_products:
-                items.length,
-
+            processing_time_ms: Date.now() - t0,
+            imported_products: items.length,
             metadata,
-
             items,
-
-            purchase_id:
-                pendingPurchaseId,
+            purchase_id: pendingPurchaseId,
+            ocr_metadata: parsed.ocr_metadata,
+            confidence_score: parsed.confidence_score,
+            needs_manual_review: parsed.needs_manual_review,
+            validation_warnings: parsed.validation_warnings
         });
 
     } catch (error) {
-        console.error(
-            "[AUTO IMPORT ERROR]",
-            error
-        );
+        console.error("[AUTO IMPORT ERROR]", error);
 
         return res.status(500).json({
             success: false,
             message: "Auto import failed",
             error: error.message,
         });
-
     }
 };
 

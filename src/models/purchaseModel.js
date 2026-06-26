@@ -80,6 +80,20 @@ const purchaseSchema = new mongoose.Schema(
             enum: ["pending", "received", "cancelled"],
             default: "pending",
         },
+
+        // OCR Pipeline metadata
+        confidence_score: {
+            type: Number,
+            default: 1.0,
+        },
+        needs_manual_review: {
+            type: Boolean,
+            default: false,
+        },
+        validation_warnings: {
+            type: Array,
+            default: [],
+        },
     },
     { timestamps: true }
 );
