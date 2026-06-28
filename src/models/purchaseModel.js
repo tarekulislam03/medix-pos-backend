@@ -68,6 +68,12 @@ const purchaseSchema = new mongoose.Schema(
             mrp: { type: Number, default: 0 }
         }],
 
+        // Raw items extracted by OCR before user review
+        extracted_items: {
+            type: Array,
+            default: [],
+        },
+
         // Source: 'manual' = uploaded from Purchase page, 'auto_import' = from Inventory auto-import
         source: {
             type: String,
@@ -77,7 +83,7 @@ const purchaseSchema = new mongoose.Schema(
 
         status: {
             type: String,
-            enum: ["pending", "received", "cancelled"],
+            enum: ["pending", "received", "cancelled", "processing", "failed"],
             default: "pending",
         },
 

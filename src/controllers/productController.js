@@ -1,7 +1,7 @@
 import bwipjs from "bwip-js";
 import crypto from "crypto";
 import Inventory from "../models/productModel.js";
-import { extractInvoiceFromPython } from "../services/llmService.js";
+import { extractInvoiceFromLLM } from "../services/llmService.js";
 import { safeParseJSON } from "../services/jsonParser.js";
 import { optimizeInvoiceImage } from "../services/imageOptimizer.js";
 import { normalizeImage } from "../middleware/imageNormalizationMiddleware.js";
@@ -413,132 +413,131 @@ const autoImportProducts = async (req, res) => {
             });
         }
 
-        console.log("[1] Request received");
+        console.log("[1] Request received for auto-import");
 
         const originalBuffer = req.file.buffer;
         const originalName = req.file.originalname;
         const originalMime = req.file.mimetype;
-
-        console.log("[1.5] Image compression start");
-        const { buffer: compressedBuffer } = await optimizeInvoiceImage(originalBuffer, originalMime);
-        console.log("[1.6] Image compression end", Date.now() - t0, "ms");
-
-        console.log("[2] Python OCR Pipeline start");
+        const storeId = req.storeId;
         
-        // Call Python backend
-        const parsed = await extractInvoiceFromPython(compressedBuffer, originalName, originalMime);
+        const manualSupplierName = req.body.supplier_name || "";
+        const manualBillDate = req.body.bill_date || "";
+        const manualTotalAmount = req.body.total_amount || 0;
 
-        console.log("[3] Python OCR Pipeline completed", Date.now() - t0, "ms");
-
-        if (!parsed || !parsed.items || !Array.isArray(parsed.items)) {
-            console.error("PIPELINE RESPONSE:", parsed);
-            throw new Error("Invalid pipeline response format: missing items array");
-        }
-
-        const items = parsed.items;
-        const invMeta = parsed.invoice || {};
-        const storeMeta = parsed.store || {};
-        const totalsMeta = parsed.totals || {};
-
-        const metadata = {
-            supplier_name: storeMeta.name || "",
-            supplier_gstin: storeMeta.gstin || "",
-            invoice_no: invMeta.number || "",
-            invoice_date: invMeta.date || "",
-
-            subtotal: Number(totalsMeta.subtotal) || 0,
-            taxable_amount: Number(totalsMeta.taxable_amount) || 0,
-            cgst_amount: Number(totalsMeta.cgst_amount) || 0,
-            sgst_amount: Number(totalsMeta.sgst_amount) || 0,
-            grand_total: Number(totalsMeta.grand_total) || 0,
-        };
-
-        const calculatedTotal = items.reduce(
-            (sum, item) => sum + (Number(item.amount) || 0),
-            0
-        );
-
-        console.log("Invoice Total:", metadata.grand_total);
-        console.log("Calculated Total:", calculatedTotal);
-
-        let pendingPurchaseId = null;
-
-        try {
-            // 1. Create Purchase record immediately (fast DB insert)
-            const purchase = await Purchase.create({
-                storeId: req.storeId,
-                bill_image_url: "", // will be updated async
-                cloudinary_public_id: "",
-
-                supplier_name: metadata.supplier_name,
-                supplier_gstin: metadata.supplier_gstin,
-                bill_no: metadata.invoice_no,
-                bill_date: metadata.invoice_date,
-                subtotal: metadata.subtotal,
-                taxable_amount: metadata.taxable_amount,
-                cgst_amount: metadata.cgst_amount,
-                sgst_amount: metadata.sgst_amount,
-                grand_total: metadata.grand_total,
-                items_count: items.length,
-                
-                // OCR Metadata
-                confidence_score: parsed.confidence_score || 0.0,
-                needs_manual_review: parsed.needs_manual_review || false,
-                validation_warnings: parsed.validation_warnings || [],
-
-                source: "auto_import",
-                status: "pending",
-            });
-
-            pendingPurchaseId = purchase._id.toString();
-
-            // 2. Fire-and-forget Cloudinary upload so user doesn't wait
-            uploadToCloudinary(
-                compressedBuffer,
-                originalName,
-                'image/jpeg'
-            ).then(async ({ secure_url, public_id }) => {
-                await Purchase.findByIdAndUpdate(pendingPurchaseId, {
-                    bill_image_url: secure_url,
-                    cloudinary_public_id: public_id
-                });
-            }).catch(cloudErr => {
-                console.warn("[Cloudinary Async Error]", cloudErr.message);
-            });
-
-        } catch (dbErr) {
-            console.warn("[Purchase DB Error]", dbErr.message);
-        }
-
-        console.log("[6] Import completed", Date.now() - t0, "ms");
-
-        return res.status(200).json({
-            success: true,
-            processing_time_ms: Date.now() - t0,
-            imported_products: items.length,
-            metadata,
-            items,
-            purchase_id: pendingPurchaseId,
-            ocr_metadata: parsed.ocr_metadata,
-            confidence_score: parsed.confidence_score,
-            needs_manual_review: parsed.needs_manual_review,
-            validation_warnings: parsed.validation_warnings
+        // 1. Create Purchase record immediately
+        const purchase = await Purchase.create({
+            storeId,
+            source: "auto_import",
+            status: "processing",
+            bill_image_url: "", 
+            cloudinary_public_id: "",
+            supplier_name: manualSupplierName,
+            bill_date: manualBillDate,
+            total_amount: manualTotalAmount ? Number(manualTotalAmount) : 0,
         });
+
+        const pendingPurchaseId = purchase._id.toString();
+
+        // 2. Respond to client immediately
+        res.status(202).json({
+            success: true,
+            message: "Upload successful, processing in background.",
+            purchase_id: pendingPurchaseId
+        });
+
+        // 3. Process in background
+        (async () => {
+            try {
+                console.log("[1.5] Image compression start for", pendingPurchaseId);
+                const { buffer: compressedBuffer, base64: imageBase64, mimeType } = await optimizeInvoiceImage(originalBuffer, originalMime);
+
+                // Start Cloudinary upload in parallel
+                let cloudResult = null;
+                uploadToCloudinary(compressedBuffer, originalName, 'image/jpeg')
+                    .then(res => { cloudResult = res; })
+                    .catch(err => console.warn("[Cloudinary Async Error]", err.message));
+
+                console.log("[2] LLM OCR Pipeline start for", pendingPurchaseId);
+                const parsed = await extractInvoiceFromLLM(imageBase64, mimeType);
+                console.log("[3] LLM OCR Pipeline completed for", pendingPurchaseId);
+
+                if (!parsed || !parsed.items || !Array.isArray(parsed.items)) {
+                    throw new Error("Invalid pipeline response format: missing items array");
+                }
+
+                const items = parsed.items;
+                const invMeta = parsed.invoice || {};                
+                const storeMeta = parsed.store || {};
+                const totalsMeta = parsed.totals || {};
+
+                const metadata = {
+                    supplier_name: manualSupplierName || storeMeta.name || "",
+                    supplier_gstin: storeMeta.gstin || "",
+                    invoice_no: invMeta.number || "",
+                    invoice_date: manualBillDate || invMeta.date || "",
+                    subtotal: Number(totalsMeta.subtotal) || 0,
+                    taxable_amount: Number(totalsMeta.taxable_amount) || 0,
+                    cgst_amount: Number(totalsMeta.cgst_amount) || 0,
+                    sgst_amount: Number(totalsMeta.sgst_amount) || 0,
+                    total_amount: manualTotalAmount ? Number(manualTotalAmount) : (Number(totalsMeta.grand_total) || 0)
+                };
+
+                // Update Purchase record with extracted data
+                await Purchase.findByIdAndUpdate(pendingPurchaseId, {
+                    status: "pending",
+                    supplier_name: metadata.supplier_name,
+                    supplier_gstin: metadata.supplier_gstin,
+                    bill_no: metadata.invoice_no,
+                    bill_date: metadata.invoice_date,
+                    subtotal: metadata.subtotal,
+                    taxable_amount: metadata.taxable_amount,
+                    cgst_amount: metadata.cgst_amount,
+                    sgst_amount: metadata.sgst_amount,
+                    total_amount: metadata.total_amount,
+                    items_count: items.length,
+                    extracted_items: items,
+                    confidence_score: parsed.confidence_score || 0.0,
+                    needs_manual_review: true, // Always require review for now
+                    validation_warnings: parsed.validation_warnings || [],
+                    ...(cloudResult && {
+                        bill_image_url: cloudResult.secure_url,
+                        cloudinary_public_id: cloudResult.public_id
+                    })
+                });
+
+                console.log("[6] Background Import completed for", pendingPurchaseId);
+
+            } catch (bgError) {
+                console.error("[BACKGROUND AUTO IMPORT ERROR]", bgError);
+                await Purchase.findByIdAndUpdate(pendingPurchaseId, {
+                    status: "failed",
+                    notes: bgError.message
+                }).catch(() => {}); // ignore db errors during failure update
+            }
+        })();
 
     } catch (error) {
         console.error("[AUTO IMPORT ERROR]", error);
-
-        return res.status(500).json({
-            success: false,
-            message: "Auto import failed",
-            error: error.message,
-        });
+        if (!res.headersSent) {
+            return res.status(500).json({
+                success: false,
+                message: "Auto import failed to start",
+                error: error.message,
+            });
+        }
     }
 };
 
 const autoImportConfirm = async (req, res) => {
     try {
-        const { items } = req.body;
+        const { purchaseId, items } = req.body;
+
+        if (!purchaseId) {
+            return res.status(400).json({
+                success: false,
+                message: "Missing purchaseId"
+            });
+        }
 
         if (!Array.isArray(items) || !items.length) {
             return res.status(400).json({
@@ -738,6 +737,17 @@ const autoImportConfirm = async (req, res) => {
                 ordered: false
             }
         );
+
+        /*
+        ===================================
+        STEP 6: UPDATE PURCHASE RECORD
+        ===================================
+        */
+        await Purchase.findByIdAndUpdate(purchaseId, {
+            status: "received",
+            needs_manual_review: false,
+            items_count: finalItems.length
+        });
 
         return res.json({
             success: true,

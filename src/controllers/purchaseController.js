@@ -132,14 +132,8 @@ const deletePurchase = async (req, res) => {
 };
 
 const getNextShortBarcode = async (storeId) => {
-    const lastProduct = await Inventory.findOne({ storeId, short_barcode: { $exists: true } })
-        .sort({ short_barcode: -1 })
-        .collation({ locale: "en_US", numericOrdering: true });
-
-    if (lastProduct && lastProduct.short_barcode && !isNaN(lastProduct.short_barcode)) {
-        return (parseInt(lastProduct.short_barcode, 10) + 1).toString();
-    }
-    return "100001";
+    // Generate 8-digit random number
+    return Math.floor(10000000 + Math.random() * 90000000).toString();
 };
 
 const escapeRegExp = (string) => {
