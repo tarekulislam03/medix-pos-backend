@@ -1,5 +1,6 @@
 import axios from "axios";
 import FormData from "form-data";
+import mongoose from "mongoose";
 import Purchase from "../models/purchaseModel.js";
 import Inventory from "../models/productModel.js";
 
@@ -59,8 +60,8 @@ const uploadBill = async (req, res) => {
             supplier_name:        req.body.supplier_name  || "",
             notes:                req.body.notes          || "",
             total_amount:         Number(req.body.total_amount) || 0,
-            source:               "manual",
-            status:               "received",
+            source:               "auto_import",
+            status:               "processing",
         });
 
         return res.status(201).json({
@@ -70,6 +71,23 @@ const uploadBill = async (req, res) => {
         });
     } catch (error) {
         console.error("Upload Bill Error:", error.message);
+        return res.status(500).json({ success: false, message: error.message });
+    }
+};
+
+// ── GET /api/v1/purchase/admin/auto-import-bills ──────────────────────────
+const getAutoImportBills = async (req, res) => {
+    try {
+        const purchases = await Purchase.find({ 
+            source: "auto_import", 
+            // We can fetch all auto-import or just processing. Let's fetch all.
+        })
+        .populate("storeId", "storeName")
+        .sort({ createdAt: -1 });
+
+        return res.status(200).json({ success: true, data: purchases });
+    } catch (error) {
+        console.error("Get Auto-Import Bills Error:", error.message);
         return res.status(500).json({ success: false, message: error.message });
     }
 };
@@ -103,6 +121,44 @@ const finalizePurchase = async (req, res) => {
         return res.status(200).json({ success: true, data: purchase });
     } catch (error) {
         console.error("Finalize Purchase Error:", error.message);
+        return res.status(500).json({ success: false, message: error.message });
+    }
+};
+
+// ── PATCH /api/v1/purchase/:id/save-json ─────────────────────────────────
+// Called when admin uploads JSON. Updates the Purchase record so it's ready for manual review.
+const savePurchaseJson = async (req, res) => {
+    try {
+        const { id } = req.params;
+        const { supplier_name, supplier_gstin, bill_no, bill_date, items, total_amount, taxable_amount, cgst_amount, sgst_amount } = req.body;
+
+        const purchase = await Purchase.findOneAndUpdate(
+            { _id: id, storeId: req.storeId },
+            {
+                $set: {
+                    supplier_name: supplier_name || "",
+                    supplier_gstin: supplier_gstin || "",
+                    bill_no: bill_no || "",
+                    bill_date: bill_date || null,
+                    extracted_items: items || [],
+                    total_amount: Number(total_amount) || 0,
+                    taxable_amount: Number(taxable_amount) || 0,
+                    cgst_amount: Number(cgst_amount) || 0,
+                    sgst_amount: Number(sgst_amount) || 0,
+                    needs_manual_review: true,
+                    status: "pending",
+                },
+            },
+            { returnDocument: "after" }
+        );
+
+        if (!purchase) {
+            return res.status(404).json({ success: false, message: "Purchase record not found" });
+        }
+
+        return res.status(200).json({ success: true, data: purchase });
+    } catch (error) {
+        console.error("Save Purchase JSON Error:", error.message);
         return res.status(500).json({ success: false, message: error.message });
     }
 };
@@ -153,7 +209,8 @@ const createManualPurchase = async (req, res) => {
             sgst_amount,
             total_amount,
             notes,
-            storeId
+            storeId,
+            purchase_id
         } = req.body;
 
         const storeIdToUse = storeId || req.storeId;
@@ -162,108 +219,140 @@ const createManualPurchase = async (req, res) => {
             return res.status(400).json({ success: false, message: "Purchase must contain at least one item." });
         }
 
-        const imported_items = [];
-        
-        for (let item of items) {
-            const normalizedName = (item.medicine_name || "").trim().toUpperCase();
-            if (!normalizedName) continue;
+        const session = await mongoose.startSession();
+        session.startTransaction();
+
+        try {
+            const imported_items = [];
             
-            const cleanNumber = (val) => Number(String(val || 0).replace(/[^\d.]/g, "")) || 0;
-            const batchNum = item.batch_number || "";
-            
-            // Format expiry_date to last day of the month if it's YYYY-MM or MM/YY
-            let exp = item.expiry_date;
-            if (exp && typeof exp === 'string') {
-                if (/^\d{4}-\d{2}$/.test(exp)) {
-                    // YYYY-MM
-                    const [year, month] = exp.split('-');
-                    const lastDay = new Date(parseInt(year), parseInt(month), 0).getDate();
-                    item.expiry_date = `${year}-${month}-${String(lastDay).padStart(2, '0')}`;
-                } else if (/^\d{2}\/\d{2}$/.test(exp)) {
-                    // MM/YY
-                    const [month, yy] = exp.split('/');
-                    const year = `20${yy}`;
-                    const lastDay = new Date(parseInt(year), parseInt(month), 0).getDate();
-                    item.expiry_date = `${year}-${month}-${String(lastDay).padStart(2, '0')}`;
+            for (let item of items) {
+                const nameToUse = item.medicine_name || item.product_name || "";
+                const normalizedName = nameToUse.trim().toUpperCase();
+                if (!normalizedName) continue;
+                
+                const cleanNumber = (val) => Number(String(val || 0).replace(/[^\d.]/g, "")) || 0;
+                const addedQuantity = cleanNumber(item.quantity);
+                let rateAmount = cleanNumber(item.rate);
+                let discountPercent = cleanNumber(item.discount);
+                let costPriceAfterDiscount = rateAmount - (rateAmount * (discountPercent / 100));
+                
+                // Format expiry_date to last day of the month if it's YYYY-MM or MM/YY
+                let exp = item.expiry_date;
+                if (exp && typeof exp === 'string') {
+                    if (/^\d{4}-\d{2}$/.test(exp)) {
+                        const [year, month] = exp.split('-');
+                        const lastDay = new Date(parseInt(year), parseInt(month), 0).getDate();
+                        item.expiry_date = `${year}-${month}-${String(lastDay).padStart(2, '0')}`;
+                    } else if (/^\d{2}\/\d{2}$/.test(exp)) {
+                        const [month, yy] = exp.split('/');
+                        const year = `20${yy}`;
+                        const lastDay = new Date(parseInt(year), parseInt(month), 0).getDate();
+                        item.expiry_date = `${year}-${month}-${String(lastDay).padStart(2, '0')}`;
+                    }
                 }
+                
+                // Find or Create in Inventory
+                let inventoryItem = await Inventory.findOne({
+                    storeId: storeIdToUse,
+                    medicine_name: {
+                        $regex: new RegExp(`^${escapeRegExp(normalizedName)}$`, "i")
+                    },
+                    batch_number: item.batch_number || ""
+                }).session(session);
+
+                if (inventoryItem) {
+                    inventoryItem.quantity += addedQuantity;
+                    inventoryItem.mrp = cleanNumber(item.mrp);
+                    if (item.expiry_date) inventoryItem.expiry_date = item.expiry_date;
+                    if (item.rate !== undefined) inventoryItem.cost_price = costPriceAfterDiscount;
+                    if (item.hsn_code) inventoryItem.hsn_code = item.hsn_code;
+                    if (item.gst !== undefined) inventoryItem.gst = cleanNumber(item.gst);
+                    
+                    await inventoryItem.save({ session });
+                } else {
+                    const short_barcode = await getNextShortBarcode(storeIdToUse);
+                    inventoryItem = await Inventory.create([{
+                        medicine_name: normalizedName,
+                        mrp: cleanNumber(item.mrp),
+                        quantity: addedQuantity,
+                        cost_price: item.rate !== undefined ? costPriceAfterDiscount : null,
+                        expiry_date: item.expiry_date || null,
+                        batch_number: item.batch_number || "",
+                        hsn_code: item.hsn_code || "",
+                        gst: item.gst ? cleanNumber(item.gst) : 0,
+                        short_barcode: short_barcode,
+                        storeId: storeIdToUse
+                    }], { session });
+                    inventoryItem = inventoryItem[0];
+                }
+                
+                imported_items.push({
+                    inventoryId: inventoryItem._id,
+                    quantity: addedQuantity,
+                    mrp: cleanNumber(item.mrp)
+                });
             }
-            
-            let product = await Inventory.findOne({
-                storeId: storeIdToUse,
-                medicine_name: {
-                    $regex: new RegExp(`^${escapeRegExp(normalizedName)}$`, "i")
-                },
-                batch_number: batchNum
+
+            let purchase;
+            if (purchase_id) {
+                purchase = await Purchase.findOneAndUpdate(
+                    { _id: purchase_id, storeId: storeIdToUse },
+                    {
+                        $set: {
+                            supplier_name: supplier_name || "",
+                            supplier_gstin: supplier_gstin || "",
+                            bill_no: bill_no || "",
+                            bill_date: bill_date || "",
+                            notes: notes || "",
+                            taxable_amount: Number(taxable_amount) || 0,
+                            cgst_amount: Number(cgst_amount) || 0,
+                            sgst_amount: Number(sgst_amount) || 0,
+                            total_amount: Number(total_amount) || 0,
+                            items_count: items.length,
+                            imported_items: imported_items,
+                            status: "received",
+                            needs_manual_review: false
+                        }
+                    },
+                    { new: true, session }
+                );
+                if (!purchase) {
+                    throw new Error("Purchase document not found for update.");
+                }
+            } else {
+                purchase = await Purchase.create([{
+                    storeId: storeIdToUse,
+                    supplier_name: supplier_name || "",
+                    supplier_gstin: supplier_gstin || "",
+                    bill_no: bill_no || "",
+                    bill_date: bill_date || "",
+                    notes: notes || "",
+                    taxable_amount: Number(taxable_amount) || 0,
+                    cgst_amount: Number(cgst_amount) || 0,
+                    sgst_amount: Number(sgst_amount) || 0,
+                    total_amount: Number(total_amount) || 0,
+                    items_count: items.length,
+                    imported_items: imported_items,
+                    source: "manual",
+                    status: "received"
+                }], { session });
+                purchase = purchase[0];
+            }
+
+            await session.commitTransaction();
+            session.endSession();
+
+            return res.status(201).json({
+                success: true,
+                message: "Manual purchase saved and inventory updated successfully.",
+                data: purchase,
             });
 
-            let rateAmount = cleanNumber(item.rate);
-            let discountPercent = cleanNumber(item.discount);
-            let costPriceAfterDiscount = rateAmount - (rateAmount * (discountPercent / 100));
-
-            if (product) {
-                // Update existing batch (forces overwrite of MRP/Expiry)
-                product.quantity += cleanNumber(item.quantity);
-                product.mrp = cleanNumber(item.mrp);
-                product.supplier_name = supplier_name || product.supplier_name;
-                if (item.expiry_date) product.expiry_date = item.expiry_date;
-                if (item.rate !== undefined) product.cost_price = costPriceAfterDiscount;
-                if (item.hsn_code) product.hsn_code = item.hsn_code;
-                if (item.gst !== undefined) product.gst = cleanNumber(item.gst);
-                
-                await product.save();
-                
-                imported_items.push({
-                    inventoryId: product._id,
-                    quantity: cleanNumber(item.quantity),
-                    mrp: cleanNumber(item.mrp)
-                });
-            } else {
-                // Create new inventory
-                const short_barcode = await getNextShortBarcode(storeIdToUse);
-                const newProduct = await Inventory.create({
-                    medicine_name: normalizedName,
-                    mrp: cleanNumber(item.mrp),
-                    quantity: cleanNumber(item.quantity),
-                    cost_price: item.rate !== undefined ? costPriceAfterDiscount : null,
-                    supplier_name: supplier_name || "",
-                    expiry_date: item.expiry_date || null,
-                    batch_number: batchNum,
-                    hsn_code: item.hsn_code || "",
-                    gst: item.gst ? cleanNumber(item.gst) : 0,
-                    short_barcode: short_barcode,
-                    storeId: storeIdToUse
-                });
-                
-                imported_items.push({
-                    inventoryId: newProduct._id,
-                    quantity: cleanNumber(item.quantity),
-                    mrp: cleanNumber(item.mrp)
-                });
-            }
+        } catch (error) {
+            await session.abortTransaction();
+            session.endSession();
+            throw error;
         }
-
-        const purchase = await Purchase.create({
-            storeId: storeIdToUse,
-            supplier_name: supplier_name || "",
-            supplier_gstin: supplier_gstin || "",
-            bill_no: bill_no || "",
-            bill_date: bill_date || "",
-            notes: notes || "",
-            taxable_amount: Number(taxable_amount) || 0,
-            cgst_amount: Number(cgst_amount) || 0,
-            sgst_amount: Number(sgst_amount) || 0,
-            total_amount: Number(total_amount) || 0,
-            items_count: items.length,
-            imported_items: imported_items,
-            source: "manual",
-            status: "received"
-        });
-
-        return res.status(201).json({
-            success: true,
-            message: "Manual purchase saved and inventory updated successfully.",
-            data: purchase,
-        });
 
     } catch (error) {
         console.error("Create Manual Purchase Error:", error.message);
@@ -271,4 +360,4 @@ const createManualPurchase = async (req, res) => {
     }
 };
 
-export { uploadBill, getPurchases, deletePurchase, finalizePurchase, createManualPurchase };
+export { uploadBill, getAutoImportBills, getPurchases, deletePurchase, finalizePurchase, createManualPurchase, savePurchaseJson };

@@ -100,42 +100,42 @@ const checkout = async (req, res) => {
         const stockOperations = [];
         const saleItems = [];
 
+        // Frontend sends product_id which maps to Inventory _id
         const productIds = items.map(item => item.product_id);
 
-        const products = await Inventory.find({
+        const inventoryItems = await Inventory.find({
             _id: { $in: productIds },
             storeId: req.storeId
         }).session(session).lean();
 
-        const productMap = new Map(
-            products.map(p => [String(p._id), p])
+        const inventoryMap = new Map(
+            inventoryItems.map(i => [String(i._id), i])
         );
 
         for (const item of items) {
 
-            let product = productMap.get(String(item.product_id));
+            let inventoryItem = inventoryMap.get(String(item.product_id));
 
-            // If product is not found, fallback for manual entry
-            if (!product) {
-                product = {
+            // If inventory item is not found, fallback for manual entry
+            if (!inventoryItem) {
+                inventoryItem = {
                     _id: item.product_id || `manual_${Date.now()}`,
-                    medicine_name: item.medicine_name || 'Unknown Item',
                     mrp: Number(item.mrp || 0),
                     cost_price: 0,
                     quantity: 99999, // infinite for manual
+                    medicine_name: item.medicine_name || 'Unknown Item',
                     barcode: '',
                     gst: item.gst_percent || 0,
                     hsn_code: '',
-                    save: async () => {} // no-op
                 };
             }
 
             // Stock availability check (in memory before strict DB check)
-            if (product.quantity < item.quantity) {
+            if (inventoryItem.quantity < item.quantity) {
                 await session.abortTransaction();
                 session.endSession();
                 return res.status(400).json({
-                    message: `Insufficient stock for ${product.medicine_name}`
+                    message: `Insufficient stock for ${inventoryItem.medicine_name}`
                 });
             }
 
@@ -153,7 +153,7 @@ const checkout = async (req, res) => {
             if (item.is_loose_sale) {
                 itemSubtotal = Number(item.loose_total_price || 0);
             } else {
-                itemSubtotal = product.mrp * item.quantity;
+                itemSubtotal = inventoryItem.mrp * item.quantity;
             }
 
             const discountAmount = Number(
@@ -165,7 +165,7 @@ const checkout = async (req, res) => {
             );
 
             // GST Calculations
-            const gstPercent = Number(product.gst ?? 0);
+            const gstPercent = Number(inventoryItem.gst ?? 0);
             let taxableAmount = itemTotal; // when GST is 0
             let cgstAmount = 0;
             let sgstAmount = 0;
@@ -190,7 +190,7 @@ const checkout = async (req, res) => {
             subtotal = subtotal + itemSubtotal;
             total_discount = total_discount + discountAmount;
 
-            const itemCostPrice = Number(product.cost_price || product.mrp || 0);
+            const itemCostPrice = Number(inventoryItem.cost_price || inventoryItem.mrp || 0);
             const itemProfit = itemTotal - (itemCostPrice * item.quantity);
             total_profit += itemProfit;
 
@@ -200,10 +200,10 @@ const checkout = async (req, res) => {
             const igstAmount = 0;
 
             saleItems.push({
-                product_id: product._id,
-                medicine_name: product.medicine_name,
-                barcode: product.barcode,
-                mrp: product.mrp,
+                product_id: inventoryItem._id, 
+                medicine_name: inventoryItem.medicine_name,
+                barcode: inventoryItem.barcode,
+                mrp: inventoryItem.mrp,
                 cost_price: itemCostPrice,
                 quantity: item.quantity,
                 discount_percent: discountPercent,
@@ -214,15 +214,15 @@ const checkout = async (req, res) => {
                 cgst_amount: cgstAmount,
                 sgst_amount: sgstAmount,
                 igst_amount: igstAmount,
-                hsn_code: product.hsn_code || ""
+                hsn_code: inventoryItem.hsn_code || ""
             });
 
-            // Deduct stock only for real products, ATOMICALLY
-            if (!String(product._id).startsWith('manual_')) {
+            // Deduct stock only for real inventory items, ATOMICALLY
+            if (!String(inventoryItem._id).startsWith('manual_')) {
                 stockOperations.push({
                     updateOne: {
                         filter: {
-                            _id: product._id,
+                            _id: inventoryItem._id,
                             storeId: req.storeId,
                             quantity: { $gte: item.quantity } // Strict atomic lock
                         },
@@ -249,13 +249,8 @@ const checkout = async (req, res) => {
             }
         }
         
-        // Remove zero-stock items that HAVE a batch number (batch-specific products).
-        await Inventory.deleteMany({
-            _id: { $in: productIds },
-            storeId: req.storeId,
-            quantity: { $lte: 0 },
-            batch_number: { $exists: true, $ne: "" }
-        }, { session });
+        // Note: As per architecture plan, we no longer delete zero-stock batches.
+        // The StockLedger and Batch available_quantity = 0 handles this securely.
 
         subtotal = Number(subtotal.toFixed(2));
         total_discount = Number(total_discount.toFixed(2));
@@ -325,6 +320,8 @@ const checkout = async (req, res) => {
         });
         
         await sale.save({ session });
+
+
 
         // Update Customer Credit
         if (customer) {

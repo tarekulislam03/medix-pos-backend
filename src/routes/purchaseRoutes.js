@@ -1,6 +1,6 @@
 import { Router } from "express";
 import multer from "multer";
-import { uploadBill, getPurchases, deletePurchase, finalizePurchase, createManualPurchase } from "../controllers/purchaseController.js";
+import { uploadBill, getAutoImportBills, getPurchases, deletePurchase, finalizePurchase, createManualPurchase, savePurchaseJson } from "../controllers/purchaseController.js";
 
 const purchaseRouter = Router();
 
@@ -20,8 +20,10 @@ const upload = multer({
 
 purchaseRouter.post("/manual", createManualPurchase);
 purchaseRouter.post("/upload-bill", upload.single("bill"), uploadBill);
+purchaseRouter.get("/admin/auto-import", getAutoImportBills);
 purchaseRouter.get("/", getPurchases);
 purchaseRouter.patch("/:id/finalize", finalizePurchase);
+purchaseRouter.patch("/:id/save-json", savePurchaseJson);
 purchaseRouter.delete("/:id", deletePurchase);
 
 export default purchaseRouter;
