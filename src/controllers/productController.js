@@ -10,6 +10,7 @@ import { extractTextFromOCRSpace } from "../middleware/textExtractorMiddleware.j
 import { uploadToCloudinary } from "./purchaseController.js";
 import Purchase from "../models/purchaseModel.js";
 import Counter from "../models/counterModel.js";
+import StockMovement from "../models/stockMovementModel.js";
 
 const escapeRegExp = (string) => {
     return string.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -87,6 +88,7 @@ const createProduct = async (req, res) => {
                 });
             }
 
+            const previousQuantity = product.quantity;
             product.quantity += cleanNumber(quantity);
             product.mrp = incomingMrp;
             product.supplier_name = supplier_name || null;
@@ -99,6 +101,20 @@ const createProduct = async (req, res) => {
             product.gst = gst ? cleanNumber(gst) : 0;
 
             await product.save();
+
+            if (cleanNumber(quantity) !== 0) {
+                await StockMovement.create({
+                    storeId: req.storeId,
+                    productId: product._id,
+                    medicine_name: product.medicine_name,
+                    transaction_type: "MANUAL_ADJUSTMENT",
+                    reference_id: null,
+                    quantity_change: cleanNumber(quantity),
+                    previous_stock: previousQuantity,
+                    current_stock: product.quantity,
+                    remarks: "Added via Create/Update Product"
+                });
+            }
 
 
 
@@ -129,6 +145,18 @@ const createProduct = async (req, res) => {
                 batch_number: batch_number || "",
                 hsn_code: hsn_code || "",
                 gst: gst ? cleanNumber(gst) : 0
+            });
+
+            await StockMovement.create({
+                storeId: req.storeId,
+                productId: product._id,
+                medicine_name: product.medicine_name,
+                transaction_type: "INITIAL_STOCK",
+                reference_id: null,
+                quantity_change: cleanNumber(quantity),
+                previous_stock: 0,
+                current_stock: cleanNumber(quantity),
+                remarks: "Initial stock via Create Product"
             });
 
 
@@ -209,6 +237,15 @@ const getProductById = async (req, res) => {
 // Update product by id
 const updateProduct = async (req, res) => {
     try {
+        const oldProduct = await Inventory.findOne({ _id: req.params.id, storeId: req.storeId });
+        
+        if (!oldProduct) {
+            return res.status(400).json({
+                message: "No products found"
+            })
+        }
+
+        const previousQuantity = oldProduct.quantity;
 
         const update = await Inventory.findOneAndUpdate(
             { _id: req.params.id, storeId: req.storeId },
@@ -216,10 +253,18 @@ const updateProduct = async (req, res) => {
             { returnDocument: "after" }
         );
 
-        if (!update) {
-            return res.status(400).json({
-                message: "No products found"
-            })
+        if (update && update.quantity !== previousQuantity) {
+            await StockMovement.create({
+                storeId: req.storeId,
+                productId: update._id,
+                medicine_name: update.medicine_name,
+                transaction_type: "MANUAL_ADJUSTMENT",
+                reference_id: null,
+                quantity_change: update.quantity - previousQuantity,
+                previous_stock: previousQuantity,
+                current_stock: update.quantity,
+                remarks: "Manual update via product edit"
+            });
         }
 
         res.status(200).json({

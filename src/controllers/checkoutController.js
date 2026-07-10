@@ -2,6 +2,7 @@ import mongoose from "mongoose";
 import Inventory from "../models/productModel.js";
 import Sales from "../models/salesModel.js";
 import Customer from "../models/customerModel.js";
+import StockMovement from "../models/stockMovementModel.js";
 
 const checkout = async (req, res) => {
     const session = await mongoose.startSession();
@@ -233,13 +234,33 @@ const checkout = async (req, res) => {
                         }
                     }
                 });
+
+                stockOperations.push({
+                    insertOne: {
+                        document: {
+                            storeId: req.storeId,
+                            productId: inventoryItem._id,
+                            medicine_name: inventoryItem.medicine_name,
+                            transaction_type: "SALE",
+                            reference_id: null, // We will update this after saving the sale
+                            quantity_change: -item.quantity,
+                            previous_stock: inventoryItem.quantity,
+                            current_stock: inventoryItem.quantity - item.quantity,
+                            remarks: "Sold via checkout"
+                        }
+                    }
+                });
             }
         }
 
         // Apply Stock Operations
         if (stockOperations.length > 0) {
-            const bulkResult = await Inventory.bulkWrite(stockOperations, { session });
-            if (bulkResult.modifiedCount !== stockOperations.length) {
+            // Split into updates and inserts to handle bulkWrite correctly for different collections
+            const inventoryOps = stockOperations.filter(op => op.updateOne);
+            const movementOps = stockOperations.filter(op => op.insertOne).map(op => op.insertOne.document);
+
+            const bulkResult = await Inventory.bulkWrite(inventoryOps, { session });
+            if (bulkResult.modifiedCount !== inventoryOps.length) {
                 // If the modified count doesn't match the items we tried to deduct, a concurrent transaction stole the stock!
                 await session.abortTransaction();
                 session.endSession();
@@ -321,7 +342,17 @@ const checkout = async (req, res) => {
         
         await sale.save({ session });
 
-
+        // Update reference_id for movement logs and save them
+        if (stockOperations.length > 0) {
+            const movementOps = stockOperations.filter(op => op.insertOne).map(op => {
+                const doc = op.insertOne.document;
+                doc.reference_id = sale._id;
+                return doc;
+            });
+            if (movementOps.length > 0) {
+                await StockMovement.insertMany(movementOps, { session });
+            }
+        }
 
         // Update Customer Credit
         if (customer) {

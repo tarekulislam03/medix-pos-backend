@@ -3,6 +3,7 @@ import FormData from "form-data";
 import mongoose from "mongoose";
 import Purchase from "../models/purchaseModel.js";
 import Inventory from "../models/productModel.js";
+import StockMovement from "../models/stockMovementModel.js";
 
 // ── Shared Cloudinary uploader ─────────────────────────────────────────────
 // Exported so productController can reuse it without duplication.
@@ -224,6 +225,7 @@ const createManualPurchase = async (req, res) => {
 
         try {
             const imported_items = [];
+            const movementOps = [];
             
             for (let item of items) {
                 const nameToUse = item.medicine_name || item.product_name || "";
@@ -260,8 +262,13 @@ const createManualPurchase = async (req, res) => {
                     batch_number: item.batch_number || ""
                 }).session(session);
 
+                let previousStock = 0;
+                let newStock = 0;
+
                 if (inventoryItem) {
+                    previousStock = inventoryItem.quantity;
                     inventoryItem.quantity += addedQuantity;
+                    newStock = inventoryItem.quantity;
                     inventoryItem.mrp = cleanNumber(item.mrp);
                     if (item.expiry_date) inventoryItem.expiry_date = item.expiry_date;
                     if (item.rate !== undefined) inventoryItem.cost_price = costPriceAfterDiscount;
@@ -284,7 +291,20 @@ const createManualPurchase = async (req, res) => {
                         storeId: storeIdToUse
                     }], { session });
                     inventoryItem = inventoryItem[0];
+                    newStock = addedQuantity;
                 }
+                
+                movementOps.push({
+                    storeId: storeIdToUse,
+                    productId: inventoryItem._id,
+                    medicine_name: inventoryItem.medicine_name,
+                    transaction_type: "PURCHASE",
+                    reference_id: null, // will be updated after purchase doc is saved/found
+                    quantity_change: addedQuantity,
+                    previous_stock: previousStock,
+                    current_stock: newStock,
+                    remarks: "Purchased items"
+                });
                 
                 imported_items.push({
                     inventoryId: inventoryItem._id,
@@ -337,6 +357,15 @@ const createManualPurchase = async (req, res) => {
                     status: "received"
                 }], { session });
                 purchase = purchase[0];
+            }
+
+            // Save Stock Movements
+            if (movementOps.length > 0) {
+                const opsWithRef = movementOps.map(op => ({
+                    ...op,
+                    reference_id: purchase._id
+                }));
+                await StockMovement.insertMany(opsWithRef, { session });
             }
 
             await session.commitTransaction();
