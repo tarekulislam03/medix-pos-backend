@@ -4,6 +4,9 @@ import mongoose from "mongoose";
 import Purchase from "../models/purchaseModel.js";
 import Inventory from "../models/productModel.js";
 import StockMovement from "../models/stockMovementModel.js";
+import heicConvert from "heic-convert";
+import sharp from "sharp";
+
 
 // ── Shared Cloudinary uploader ─────────────────────────────────────────────
 // Exported so productController can reuse it without duplication.
@@ -45,34 +48,79 @@ export const uploadToCloudinary = async (fileBuffer, originalName, mimeType) => 
 const uploadBill = async (req, res) => {
     try {
         if (!req.file) {
-            return res.status(400).json({ success: false, message: "No bill image provided" });
+            return res.status(400).json({
+                success: false,
+                message: "No bill image provided",
+            });
         }
 
+        let fileBuffer = req.file.buffer;
+        let fileName = req.file.originalname;
+        let mimeType = req.file.mimetype;
+
+        // Convert HEIC/HEIF (iPhone photos) to JPEG
+        const isHeic =
+            mimeType === "image/heic" ||
+            mimeType === "image/heif" ||
+            /\.(heic|heif)$/i.test(fileName);
+
+        if (isHeic) {
+            console.log("Converting HEIC to JPEG:", fileName);
+
+            const outputBuffer = await heicConvert({
+                buffer: fileBuffer,
+                format: "JPEG",
+                quality: 0.9,
+            });
+
+            fileBuffer = Buffer.from(outputBuffer);
+            fileName = fileName.replace(/\.(heic|heif)$/i, ".jpg");
+            mimeType = "image/jpeg";
+        }
+
+        // Optimize image
+        fileBuffer = await sharp(fileBuffer)
+            .rotate() // Fix phone orientation
+            .resize({
+                width: 2000,
+                height: 2000,
+                fit: "inside",
+                withoutEnlargement: true,
+            })
+            .jpeg({
+                quality: 85,
+                mozjpeg: true,
+            })
+            .toBuffer();
+
         const { secure_url, public_id } = await uploadToCloudinary(
-            req.file.buffer,
-            req.file.originalname,
-            req.file.mimetype
+            fileBuffer,
+            fileName,
+            mimeType
         );
 
         const purchase = await Purchase.create({
-            storeId:              req.storeId,
-            bill_image_url:       secure_url,
+            storeId: req.storeId,
+            bill_image_url: secure_url,
             cloudinary_public_id: public_id,
-            supplier_name:        req.body.supplier_name  || "",
-            notes:                req.body.notes          || "",
-            total_amount:         Number(req.body.total_amount) || 0,
-            source:               "auto_import",
-            status:               "processing",
+            supplier_name: req.body.supplier_name || "",
+            notes: req.body.notes || "",
+            total_amount: Number(req.body.total_amount) || 0,
+            source: "auto_import",
+            status: "processing",
         });
 
         return res.status(201).json({
             success: true,
             message: "Bill uploaded successfully",
-            data:    purchase,
+            data: purchase,
         });
     } catch (error) {
-        console.error("Upload Bill Error:", error.message);
-        return res.status(500).json({ success: false, message: error.message });
+        console.error("Upload Bill Error:", error);
+        return res.status(500).json({
+            success: false,
+            message: error.message,
+        });
     }
 };
 
