@@ -1,6 +1,5 @@
 import { Router } from "express";
 import multer from "multer";
-import path from "path";
 import { uploadBill, getAutoImportBills, getPurchases, deletePurchase, finalizePurchase, createManualPurchase, savePurchaseJson } from "../controllers/purchaseController.js";
 
 const purchaseRouter = Router();
@@ -24,26 +23,12 @@ const upload = multer({
         "application/pdf",
         "application/octet-stream",
     ];
-    const allowedExtensions = [
-        ".jpg",
-        ".jpeg",
-        ".png",
-        ".webp",
-        ".heic",
-        ".heif",
-        ".pdf",
-    ];
 
-    const ext = path.extname(file.originalname).toLowerCase();
-
-    if (
-        allowed.includes(file.mimetype) &&
-        allowedExtensions.includes(ext)
-    ) {
-        return cb(null, true);
+    if (allowed.includes(file.mimetype)) {
+        cb(null, true);
+    } else {
+        cb(new Error(`Unsupported file type: ${file.mimetype}`));
     }
-
-    return cb(new Error(`Unsupported file type: ${file.mimetype}`));
 },
 });
 
