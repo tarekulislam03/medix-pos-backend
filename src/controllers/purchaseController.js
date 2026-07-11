@@ -47,6 +47,7 @@ export const uploadToCloudinary = async (fileBuffer, originalName, mimeType) => 
 // Manual upload from the Purchase page.
 const uploadBill = async (req, res) => {
     try {
+        console.log("=== NEW BACKEND VERSION ===");
         if (!req.file) {
             return res.status(400).json({
                 success: false,
