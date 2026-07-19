@@ -215,7 +215,8 @@ const checkout = async (req, res) => {
                 cgst_amount: cgstAmount,
                 sgst_amount: sgstAmount,
                 igst_amount: igstAmount,
-                hsn_code: inventoryItem.hsn_code || ""
+                hsn_code: inventoryItem.hsn_code || "",
+                expiry_date: inventoryItem.expiry_date || null
             });
 
             // Deduct stock only for real inventory items, ATOMICALLY

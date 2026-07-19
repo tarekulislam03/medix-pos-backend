@@ -72,6 +72,10 @@ const SalesSchema = new mongoose.Schema({
             hsn_code: {
                 type: String,
                 default: ""
+            },
+            expiry_date: {
+                type: Date,
+                default: null
             }
         }
     ],
