@@ -38,6 +38,8 @@ import expenseRouter from "./routes/expenseRoutes.js";
 import masterMedicineRouter from "./routes/masterMedicineRoutes.js";
 import stockMovementRouter from "./routes/stockMovementRoutes.js";
 import savingsRouter from "./routes/savingsRoutes.js";
+import adminBillingRouter from "./routes/adminBillingRoutes.js";
+import storeBillingRouter from "./routes/storeBillingRoutes.js";
 
 // 6. Routes
 app.use("/api/v1/analytics", analyticsRouter);
@@ -54,6 +56,8 @@ app.use('/api/v1/expenses', protect, expenseRouter);
 app.use("/api/v1/master-medicines", masterMedicineRouter);
 app.use("/api/v1/stock-movement", protect, stockMovementRouter);
 app.use("/api/v1/savings", protect, savingsRouter);
+app.use("/api/v1/admin/billing", adminBillingRouter);
+app.use("/api/v1/store/billing", storeBillingRouter);
 
 app.get("/health", (req, res) => {
   res.status(200).json({ status: "ok" });
