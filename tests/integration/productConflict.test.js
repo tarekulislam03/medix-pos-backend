@@ -1,7 +1,7 @@
 import request from 'supertest';
 import app from '../../src/app.js';
 import { connectTestDB, disconnectTestDB, clearTestDB, generateTestToken } from '../setup/testHelpers.js';
-import Inventory from '../../src/models/productModel.js';
+import Inventory from '../../src/features/product/models/productModel.js';
 import mongoose from 'mongoose';
 
 let token;

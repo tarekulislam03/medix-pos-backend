@@ -23,11 +23,11 @@ const {
   setTestEnv
 } = await import('../setup/testHelpers.js');
 const { IDS, seedDatabase } = await import('../fixtures/seedData.js');
-const Purchase = (await import('../../src/models/purchaseModel.js')).default;
-const Store = (await import('../../src/models/storeModel.js')).default;
-const User = (await import('../../src/models/userModel.js')).default;
-const Customer = (await import('../../src/models/customerModel.js')).default;
-const Inventory = (await import('../../src/models/productModel.js')).default;
+const Purchase = (await import('../../src/features/purchase/models/purchaseModel.js')).default;
+const Store = (await import('../../src/features/store/models/storeModel.js')).default;
+const User = (await import('../../src/features/user/models/userModel.js')).default;
+const Customer = (await import('../../src/features/customer/models/customerModel.js')).default;
+const Inventory = (await import('../../src/features/product/models/productModel.js')).default;
 
 const models = { Store, User, Customer, Inventory };
 

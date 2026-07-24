@@ -2,10 +2,10 @@ import express from 'express';
 import cors from 'cors';
 import cookieParser from 'cookie-parser';
 import helmet from 'helmet';
-import xssMiddleware from './middleware/xssMiddleware.js';
-import { protect } from "./middleware/authMiddleware.js";
-import apiLogger from "./middleware/apiLogger.js";
-import analyticsRouter from "./routes/analyticsRoutes.js";
+import xssMiddleware from './core/middleware/xssMiddleware.js';
+import { protect } from "./core/middleware/authMiddleware.js";
+import apiLogger from "./core/middleware/apiLogger.js";
+import analyticsRouter from "./features/analytics/routes/analyticsRoutes.js";
 
 const app = express();
 
@@ -25,21 +25,21 @@ app.use(cookieParser());
 // 5. Sanitize
 app.use(xssMiddleware);
 
-import userRouter from "./routes/userRoutes.js";
-import productRouter from "./routes/productRoutes.js";
-import billingRouter from "./routes/billingRoutes.js";
-import salesRouter from "./routes/salesRoutes.js";
-import customerRouter from "./routes/customerRoutes.js";
-import labelRouter from "./routes/labelRoutes.js";
-import settingsRouter from "./routes/settingsRoutes.js";
-import purchaseRouter from "./routes/purchaseRoutes.js";
-import gstRouter from "./routes/gstRoutes.js";
-import expenseRouter from "./routes/expenseRoutes.js";
-import masterMedicineRouter from "./routes/masterMedicineRoutes.js";
-import stockMovementRouter from "./routes/stockMovementRoutes.js";
-import savingsRouter from "./routes/savingsRoutes.js";
-import adminBillingRouter from "./routes/adminBillingRoutes.js";
-import storeBillingRouter from "./routes/storeBillingRoutes.js";
+import userRouter from "./features/user/routes/userRoutes.js";
+import productRouter from "./features/product/routes/productRoutes.js";
+import billingRouter from "./features/billing/routes/billingRoutes.js";
+import salesRouter from "./features/sales/routes/salesRoutes.js";
+import customerRouter from "./features/customer/routes/customerRoutes.js";
+import labelRouter from "./features/label/routes/labelRoutes.js";
+import settingsRouter from "./features/settings/routes/settingsRoutes.js";
+import purchaseRouter from "./features/purchase/routes/purchaseRoutes.js";
+import gstRouter from "./features/gst/routes/gstRoutes.js";
+import expenseRouter from "./features/expense/routes/expenseRoutes.js";
+import masterMedicineRouter from "./features/masterMedicine/routes/masterMedicineRoutes.js";
+import stockMovementRouter from "./features/stockMovement/routes/stockMovementRoutes.js";
+import savingsRouter from "./features/savings/routes/savingsRoutes.js";
+import adminBillingRouter from "./features/subscriptionAdmin/routes/adminBillingRoutes.js";
+import storeBillingRouter from "./features/billing/routes/storeBillingRoutes.js";
 
 // 6. Routes
 app.use("/api/v1/analytics", analyticsRouter);

@@ -9,11 +9,11 @@ import {
   setTestEnv
 } from '../setup/testHelpers.js';
 import { IDS, seedDatabase } from '../fixtures/seedData.js';
-import Inventory from '../../src/models/productModel.js';
-import Sales from '../../src/models/salesModel.js';
-import Customer from '../../src/models/customerModel.js';
-import Store from '../../src/models/storeModel.js';
-import User from '../../src/models/userModel.js';
+import Inventory from '../../src/features/product/models/productModel.js';
+import Sales from '../../src/features/sales/models/salesModel.js';
+import Customer from '../../src/features/customer/models/customerModel.js';
+import Store from '../../src/features/store/models/storeModel.js';
+import User from '../../src/features/user/models/userModel.js';
 
 const models = { Store, User, Customer, Inventory };
 

@@ -3,10 +3,10 @@ import request from 'supertest';
 import app from '../../src/app.js';
 import { connectTestDB, disconnectTestDB, clearTestDB, generateTestToken, setTestEnv } from '../setup/testHelpers.js';
 import { IDS, seedDatabase } from '../fixtures/seedData.js';
-import Store from '../../src/models/storeModel.js';
-import User from '../../src/models/userModel.js';
-import Customer from '../../src/models/customerModel.js';
-import Inventory from '../../src/models/productModel.js';
+import Store from '../../src/features/store/models/storeModel.js';
+import User from '../../src/features/user/models/userModel.js';
+import Customer from '../../src/features/customer/models/customerModel.js';
+import Inventory from '../../src/features/product/models/productModel.js';
 
 describe('Critical Flows Regression E2E', () => {
     let token;

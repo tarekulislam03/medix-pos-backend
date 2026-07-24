@@ -1,5 +1,5 @@
 import { describe, it, expect } from '@jest/globals';
-import { safeParseJSON } from '../../src/services/jsonParser.js';
+import { safeParseJSON } from '../../src/core/services/jsonParser.js';
 
 describe('JSON Parser Service - safeParseJSON', () => {
     it('should parse valid JSON correctly', () => {

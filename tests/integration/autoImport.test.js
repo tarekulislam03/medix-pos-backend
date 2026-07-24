@@ -9,10 +9,10 @@ import {
   setTestEnv
 } from '../setup/testHelpers.js';
 import { IDS, seedDatabase, autoImportConfirmPayload } from '../fixtures/seedData.js';
-import Inventory from '../../src/models/productModel.js';
-import Store from '../../src/models/storeModel.js';
-import User from '../../src/models/userModel.js';
-import Customer from '../../src/models/customerModel.js';
+import Inventory from '../../src/features/product/models/productModel.js';
+import Store from '../../src/features/store/models/storeModel.js';
+import User from '../../src/features/user/models/userModel.js';
+import Customer from '../../src/features/customer/models/customerModel.js';
 
 const models = { Store, User, Customer, Inventory };
 
