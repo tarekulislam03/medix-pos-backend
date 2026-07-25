@@ -4,7 +4,7 @@ import Store from "../../store/models/storeModel.js";
 // Setup or update a store's subscription
 export const setupSubscription = async (req, res) => {
   try {
-    const { storeId, planType, totalAmount, downpayment, timelineMonths, schedules } = req.body;
+    const { storeId, planType, totalAmount, downpayment, timelineMonths, schedules, upiId, warningDays, blockDays } = req.body;
 
     if (!storeId || !planType || !totalAmount || !schedules) {
       return res.status(400).json({ message: "Missing required fields" });
@@ -23,6 +23,9 @@ export const setupSubscription = async (req, res) => {
       subscription.downpayment = downpayment;
       subscription.timelineMonths = timelineMonths;
       subscription.schedules = schedules;
+      if (upiId !== undefined) subscription.upiId = upiId;
+      if (warningDays !== undefined) subscription.warningDays = warningDays;
+      if (blockDays !== undefined) subscription.blockDays = blockDays;
       await subscription.save();
     } else {
       subscription = new StoreSubscription({
@@ -31,7 +34,10 @@ export const setupSubscription = async (req, res) => {
         totalAmount,
         downpayment,
         timelineMonths,
-        schedules
+        schedules,
+        upiId: upiId || "",
+        warningDays: warningDays !== undefined ? warningDays : 5,
+        blockDays: blockDays !== undefined ? blockDays : 10
       });
       await subscription.save();
     }
@@ -167,3 +173,65 @@ export const deleteSubscription = async (req, res) => {
     res.status(500).json({ message: "Internal server error" });
   }
 };
+
+// Add a custom payment alert schedule to a store
+export const addCustomAlert = async (req, res) => {
+  try {
+    const { storeId, amount, dueDate, upiId, warningDays, blockDays } = req.body;
+
+    if (!storeId || !amount || !dueDate) {
+      return res.status(400).json({ message: "Missing required fields" });
+    }
+
+    let subscription = await StoreSubscription.findOne({ storeId });
+
+    if (!subscription) {
+      // Create a dummy subscription to hold the custom alert
+      subscription = new StoreSubscription({
+        storeId,
+        planType: "full_payment",
+        totalAmount: 0,
+        schedules: []
+      });
+    }
+
+    subscription.schedules.push({
+      amount,
+      dueDate,
+      status: "pending",
+      isCustom: true,
+      upiId: upiId || "",
+      warningDays: warningDays !== undefined ? warningDays : 5,
+      blockDays: blockDays !== undefined ? blockDays : 10
+    });
+
+    await subscription.save();
+    res.status(200).json({ message: "Custom alert added successfully", subscription });
+  } catch (error) {
+    console.error("Add custom alert error:", error);
+    res.status(500).json({ message: "Internal server error" });
+  }
+};
+
+// Remove pending custom alerts for a store
+export const removeCustomAlert = async (req, res) => {
+  try {
+    const { storeId } = req.params;
+    const subscription = await StoreSubscription.findOne({ storeId });
+    if (!subscription) {
+      return res.status(404).json({ message: "Subscription not found" });
+    }
+
+    // Filter out pending custom alerts
+    subscription.schedules = subscription.schedules.filter(
+      s => !(s.isCustom && s.status !== "paid")
+    );
+    await subscription.save();
+
+    res.status(200).json({ message: "Custom alert removed successfully" });
+  } catch (error) {
+    console.error("Remove custom alert error:", error);
+    res.status(500).json({ message: "Internal server error" });
+  }
+};
+

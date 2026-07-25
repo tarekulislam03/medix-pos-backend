@@ -9,7 +9,11 @@ const scheduleSchema = new mongoose.Schema({
     default: "pending",
   },
   utrNumber: { type: String, default: "" },
-  paidDate: { type: Date, default: null }
+  paidDate: { type: Date, default: null },
+  isCustom: { type: Boolean, default: false },
+  upiId: { type: String, default: "" },
+  warningDays: { type: Number, default: 5 },
+  blockDays: { type: Number, default: 10 }
 });
 
 const StoreSubscriptionSchema = new mongoose.Schema({
@@ -36,6 +40,18 @@ const StoreSubscriptionSchema = new mongoose.Schema({
   timelineMonths: {
     type: Number,
     default: 1
+  },
+  upiId: {
+    type: String,
+    default: ""
+  },
+  warningDays: {
+    type: Number,
+    default: 5
+  },
+  blockDays: {
+    type: Number,
+    default: 10
   },
   schedules: [scheduleSchema],
 }, { timestamps: true });

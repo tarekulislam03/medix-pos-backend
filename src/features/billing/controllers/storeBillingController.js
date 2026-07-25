@@ -10,10 +10,6 @@ export const getBillingStatus = async (req, res) => {
       return res.status(200).json({ status: "active", message: "No subscription found" });
     }
 
-    if (subscription.planType === "full_payment") {
-      return res.status(200).json({ status: "active", message: "Full payment plans are never blocked." });
-    }
-
     const now = new Date();
     
     // Find the earliest schedule that is NOT paid
@@ -34,9 +30,14 @@ export const getBillingStatus = async (req, res) => {
 
     let appStatus = "active";
 
-    if (diffDays > 10) {
+    // Prioritize schedule-level properties if custom, else fall back to subscription
+    const blockDays = currentSchedule.isCustom ? 99999 : (subscription.blockDays !== undefined ? subscription.blockDays : 10);
+    const warningDays = currentSchedule.isCustom ? 99999 : (subscription.warningDays !== undefined ? subscription.warningDays : 5);
+    const scheduleUpiId = currentSchedule.isCustom ? "" : (subscription.upiId || "");
+
+    if (diffDays > blockDays) {
       appStatus = "blocked";
-    } else if (diffDays >= -5) {
+    } else if (diffDays >= -warningDays) {
       appStatus = "warning";
     }
 
@@ -46,7 +47,10 @@ export const getBillingStatus = async (req, res) => {
         _id: currentSchedule._id,
         amount: currentSchedule.amount,
         dueDate: currentSchedule.dueDate,
-        paymentStatus: currentSchedule.status // pending, uploaded
+        paymentStatus: currentSchedule.status, // pending, uploaded
+        isCustom: currentSchedule.isCustom || false,
+        upiId: scheduleUpiId,
+        blockDays: blockDays
       }
     });
 
