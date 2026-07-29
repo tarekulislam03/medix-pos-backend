@@ -23,10 +23,7 @@
     "bwip-js": "^4.8.0",
     "cookie-parser": "^1.4.7",
     "cors": "^2.8.6",
-<<<<<<< HEAD
-=======
     "docx": "^9.7.1",
->>>>>>> bf47cc2 (optimize ai flow)
     "dotenv": "^17.3.1",
     "express": "^5.2.1",
     "express-mongo-sanitize": "^2.2.0",
@@ -42,10 +39,7 @@
     "paddleocr": "^1.1.1",
     "pdfkit": "^0.17.2",
     "sharp": "^0.34.5",
-<<<<<<< HEAD
-=======
     "tesseract.js": "^7.0.0",
->>>>>>> bf47cc2 (optimize ai flow)
     "uuid": "^13.0.0",
     "validator": "^13.15.26",
     "xlsx": "^0.18.5",

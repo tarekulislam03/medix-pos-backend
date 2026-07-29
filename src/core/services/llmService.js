@@ -1,9 +1,7 @@
 import OpenAI from "openai";
 import { safeParseJSON } from "./jsonParser.js";
-<<<<<<< HEAD
-=======
 import Tesseract from "tesseract.js";
->>>>>>> bf47cc2 (optimize ai flow)
+ bf47cc2 (optimize ai flow)
 
 let openaiClient = null;
 
@@ -22,19 +20,6 @@ const getOpenAIClient = () => {
 // Currently using free OpenRouter models.
 
 // Step 1: Vision Models (For raw OCR / Markdown extraction)
-<<<<<<< HEAD
-const VISION_MODELS = [
-    { id: "google/gemma-4-26b-a4b-it:free",             name: "Gemma 4 26B A4B" },
-    { id: "google/gemma-4-26b-a4b-it:free",             name: "Gemma 4 26B A4B (Retry)" },
-    { id: "google/gemma-4-31b-it:free", name: "Gemma 4 31B" },
-    
-];
-
-// Step 2: Text Models (For reasoning and strict JSON parsing)
-const TEXT_MODELS = [
-    { id: "cohere/north-mini-code:free",        name: "North Mini Code" },
-    { id: "google/gemma-4-26b-a4b-it:free",          name: "Gemma 4 26B A4B" },
-=======
 // const VISION_MODELS = [
 //     { id: "google/gemma-4-26b-a4b-it:free",             name: "Gemma 4 26B A4B" },
 //     { id: "google/gemma-4-26b-a4b-it:free",             name: "Gemma 4 26B A4B (Retry)" },
@@ -48,17 +33,11 @@ const TEXT_MODELS = [
     { id: "google/gemma-4-26b-a4b-it:free", name: "Gemma 4 26B A4B (Retry)" },
     { id: "cohere/north-mini-code:free",        name: "North Mini Code" },
 
->>>>>>> bf47cc2 (optimize ai flow)
+ bf47cc2 (optimize ai flow)
 ];
 
 // ── PROMPTS ──────────────────────────────────────────────────────────────────
 
-<<<<<<< HEAD
-const OCR_PROMPT = `Please transcribe all the text and tabular data from this invoice image exactly as written. 
-Format the output as a clean Markdown table. 
-Do not attempt to interpret, calculate, or fix anything. Just read the text.
-If there are multiple tables, transcribe all of them.`;
-=======
 // const OCR_PROMPT = `You are an OCR engine.
 
 // Return the document as raw Markdown.
@@ -78,7 +57,7 @@ If there are multiple tables, transcribe all of them.`;
 // - Do not calculate totals.
 // - Use ? for unreadable text.
 // - Output only the OCR result.`;
->>>>>>> bf47cc2 (optimize ai flow)
+ bf47cc2 (optimize ai flow)
 
 const JSON_PROMPT = `You are a strict data extraction system.
 Map the following raw invoice text (Markdown) into the provided JSON schema.
@@ -86,31 +65,21 @@ Map the following raw invoice text (Markdown) into the provided JSON schema.
 Column Mapping Hints:
 Description of Goods → medicine_name
 Batch → batch_number
-<<<<<<< HEAD
-Exp Dt → expiry_date (convert to YYYY-MM-DD; if only MM/YY, use the last day of that month)
-=======
 Exp → expiry_date (convert to YYYY-MM-DD; if only MM/YY, use the last day of that month)
->>>>>>> bf47cc2 (optimize ai flow)
+ bf47cc2 (optimize ai flow)
 Qty → quantity
 Unit → unit
 Rate → purchase_price
 Discount % → discount_percentage
-<<<<<<< HEAD
-Taxable Value → taxable_value
-CGST + SGST → gst_percentage (e.g., 2.5 + 2.5 = 5)
-=======
 gst - 5% (default for all)
->>>>>>> bf47cc2 (optimize ai flow)
+ bf47cc2 (optimize ai flow)
 Amount → total_amount
 HSN/SAC → hsn_code
 
 Rules:
 1. Preserve medicine names exactly as written in the text.
-<<<<<<< HEAD
-2. Never use Old MRP.
-=======
 2. Leave the MRP field from getting any data, user will add that manually while reveiw.
->>>>>>> bf47cc2 (optimize ai flow)
+ bf47cc2 (optimize ai flow)
 3. Return numbers as numbers, not strings.
 4. Use null for missing values. Do not hallucinate data that is not explicitly in the text.
 5. Return ONLY the raw JSON object, no markdown fences, no explanations.
@@ -136,11 +105,8 @@ Schema:
       "mrp": 0,
       "discount_percentage": 0,
       "taxable_value": 0,
-<<<<<<< HEAD
-      "gst_percentage": 0,
-=======
       "gst_percentage": 5,
->>>>>>> bf47cc2 (optimize ai flow)
+ bf47cc2 (optimize ai flow)
       "total_amount": 0,
       "hsn_code": ""
     }
@@ -150,42 +116,8 @@ Schema:
 Raw Invoice Text to Parse:
 `;
 
-<<<<<<< HEAD
-// ═══════════════════════════════════════════════════════════════════════════════
-// ORIGINAL SINGLE-IMAGE EXTRACTION (kept for backward compatibility)
-// ═══════════════════════════════════════════════════════════════════════════════
 
-export const extractInvoiceFromLLM = async (base64Image, mimeType = "image/jpeg") => {
-    try {
-        const start = Date.now();
-        console.log(`[LLM Pipeline] Sending request to OpenRouter...`);
-        
-        const response = await getOpenAIClient().chat.completions.create({
-            model: "openai/gpt-4o-mini",
-            messages: [
-                {
-                    role: "user",
-                    content: [
-                        { type: "text", text: OCR_PROMPT + "\n\n" + JSON_PROMPT },
-                        { type: "image_url", image_url: { url: `data:${mimeType};base64,${base64Image}` } },
-                    ],
-                },
-            ],
-            response_format: { type: "json_object" },
-            temperature: 0.1,
-            max_tokens: 4000,
-        });
-
-        console.log(`[LLM Pipeline] Extraction completed in ${Date.now() - start} ms`);
-        return safeParseJSON(response.choices[0].message.content);
-    } catch (error) {
-        console.error("[LLM Pipeline Error]", error?.response?.data || error.message);
-        throw new Error(error?.response?.data?.error?.message || error.message || "Failed to extract invoice via LLM");
-    }
-};
-=======
-
->>>>>>> bf47cc2 (optimize ai flow)
+ bf47cc2 (optimize ai flow)
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // CONFIDENCE SCORING (Rule-based + Anti-Hallucination)
@@ -319,24 +251,6 @@ export const computeConfidence = (items, rawMarkdown) => {
 // TWO-STEP CASCADE: Vision (OCR) -> Text (JSON)
 // ═══════════════════════════════════════════════════════════════════════════════
 
-<<<<<<< HEAD
-const transcribeImage = async (image, modelId) => {
-    const response = await getOpenAIClient().chat.completions.create({
-        model: modelId,
-        messages: [{
-            role: "user",
-            content: [
-                { type: "text", text: OCR_PROMPT },
-                { type: "image_url", image_url: { url: `data:${image.mimeType};base64,${image.base64}` } }
-            ],
-        }],
-        temperature: 0.1,
-        max_tokens: 4000,
-    });
-    return response.choices[0].message.content;
-};
-
-=======
 // const transcribeImage = async (image, modelId) => {
 //     const response = await getOpenAIClient().chat.completions.create({
 //         model: modelId,
@@ -365,7 +279,7 @@ const transcribeImage = async (image) => {
 
 
 
->>>>>>> bf47cc2 (optimize ai flow)
+ bf47cc2 (optimize ai flow)
 const parseMarkdownToJSON = async (markdownText, modelId) => {
     const response = await getOpenAIClient().chat.completions.create({
         model: modelId,

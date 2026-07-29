@@ -1,11 +1,8 @@
 import bwipjs from "bwip-js";
 import crypto from "crypto";
 import Inventory from "../models/productModel.js";
-<<<<<<< HEAD
-import { extractInvoiceFromLLM } from "../../../core/services/llmService.js";
-=======
 import { extractWithCascade } from "../../../core/services/llmService.js";
->>>>>>> bf47cc2 (optimize ai flow)
+ bf47cc2 (optimize ai flow)
 import { safeParseJSON } from "../../../core/services/jsonParser.js";
 import { optimizeInvoiceImage } from "../../../core/services/imageOptimizer.js";
 import { normalizeImage } from "../../../core/middleware/imageNormalizationMiddleware.js";
@@ -483,10 +480,8 @@ const autoImportProducts = async (req, res) => {
             supplier_name: manualSupplierName,
             bill_date: manualBillDate,
             total_amount: manualTotalAmount ? Number(manualTotalAmount) : 0,
-<<<<<<< HEAD
-=======
             processing_progress: 5, // Just started
->>>>>>> bf47cc2 (optimize ai flow)
+ bf47cc2 (optimize ai flow)
         });
 
         const pendingPurchaseId = purchase._id.toString();
@@ -502,10 +497,8 @@ const autoImportProducts = async (req, res) => {
         (async () => {
             try {
                 console.log("[1.5] Image compression start for", pendingPurchaseId);
-<<<<<<< HEAD
-=======
                 await Purchase.findByIdAndUpdate(pendingPurchaseId, { processing_progress: 15 });
->>>>>>> bf47cc2 (optimize ai flow)
+ bf47cc2 (optimize ai flow)
                 const { buffer: compressedBuffer, base64: imageBase64, mimeType } = await optimizeInvoiceImage(originalBuffer, originalMime);
 
                 // Start Cloudinary upload in parallel
@@ -515,15 +508,11 @@ const autoImportProducts = async (req, res) => {
                     .catch(err => console.warn("[Cloudinary Async Error]", err.message));
 
                 console.log("[2] LLM OCR Pipeline start for", pendingPurchaseId);
-<<<<<<< HEAD
-                const parsed = await extractInvoiceFromLLM(imageBase64, mimeType);
-                console.log("[3] LLM OCR Pipeline completed for", pendingPurchaseId);
-=======
                 await Purchase.findByIdAndUpdate(pendingPurchaseId, { processing_progress: 40 }); // Uploading/Vision
                 const parsed = await extractWithCascade([{ base64: imageBase64, mimeType }]);
                 console.log("[3] LLM OCR Pipeline completed for", pendingPurchaseId);
                 await Purchase.findByIdAndUpdate(pendingPurchaseId, { processing_progress: 85 }); // Extraction complete
->>>>>>> bf47cc2 (optimize ai flow)
+ bf47cc2 (optimize ai flow)
 
                 if (!parsed || !parsed.items || !Array.isArray(parsed.items)) {
                     throw new Error("Invalid pipeline response format: missing items array");
@@ -560,16 +549,11 @@ const autoImportProducts = async (req, res) => {
                     total_amount: metadata.total_amount,
                     items_count: items.length,
                     extracted_items: items,
-<<<<<<< HEAD
-                    confidence_score: parsed.confidence_score || 0.0,
-                    needs_manual_review: true, // Always require review for now
-                    validation_warnings: parsed.validation_warnings || [],
-=======
                     confidence_score: parsed.overallConfidence || 0.0,
                     needs_manual_review: true, // Always require review for now
                     validation_warnings: parsed.validationWarnings || [],
                     processing_progress: 100,
->>>>>>> bf47cc2 (optimize ai flow)
+ bf47cc2 (optimize ai flow)
                     ...(cloudResult && {
                         bill_image_url: cloudResult.secure_url,
                         cloudinary_public_id: cloudResult.public_id
@@ -582,10 +566,8 @@ const autoImportProducts = async (req, res) => {
                 console.error("[BACKGROUND AUTO IMPORT ERROR]", bgError);
                 await Purchase.findByIdAndUpdate(pendingPurchaseId, {
                     status: "failed",
-<<<<<<< HEAD
-=======
                     processing_progress: 0,
->>>>>>> bf47cc2 (optimize ai flow)
+ bf47cc2 (optimize ai flow)
                     notes: bgError.message
                 }).catch(() => {}); // ignore db errors during failure update
             }
