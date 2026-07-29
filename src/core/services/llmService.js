@@ -1,7 +1,6 @@
 import OpenAI from "openai";
 import { safeParseJSON } from "./jsonParser.js";
 import Tesseract from "tesseract.js";
- bf47cc2 (optimize ai flow)
 
 let openaiClient = null;
 
@@ -33,7 +32,6 @@ const TEXT_MODELS = [
     { id: "google/gemma-4-26b-a4b-it:free", name: "Gemma 4 26B A4B (Retry)" },
     { id: "cohere/north-mini-code:free",        name: "North Mini Code" },
 
- bf47cc2 (optimize ai flow)
 ];
 
 // ── PROMPTS ──────────────────────────────────────────────────────────────────
@@ -57,7 +55,6 @@ const TEXT_MODELS = [
 // - Do not calculate totals.
 // - Use ? for unreadable text.
 // - Output only the OCR result.`;
- bf47cc2 (optimize ai flow)
 
 const JSON_PROMPT = `You are a strict data extraction system.
 Map the following raw invoice text (Markdown) into the provided JSON schema.
@@ -66,20 +63,17 @@ Column Mapping Hints:
 Description of Goods → medicine_name
 Batch → batch_number
 Exp → expiry_date (convert to YYYY-MM-DD; if only MM/YY, use the last day of that month)
- bf47cc2 (optimize ai flow)
 Qty → quantity
 Unit → unit
 Rate → purchase_price
 Discount % → discount_percentage
 gst - 5% (default for all)
- bf47cc2 (optimize ai flow)
 Amount → total_amount
 HSN/SAC → hsn_code
 
 Rules:
 1. Preserve medicine names exactly as written in the text.
 2. Leave the MRP field from getting any data, user will add that manually while reveiw.
- bf47cc2 (optimize ai flow)
 3. Return numbers as numbers, not strings.
 4. Use null for missing values. Do not hallucinate data that is not explicitly in the text.
 5. Return ONLY the raw JSON object, no markdown fences, no explanations.
@@ -106,7 +100,6 @@ Schema:
       "discount_percentage": 0,
       "taxable_value": 0,
       "gst_percentage": 5,
- bf47cc2 (optimize ai flow)
       "total_amount": 0,
       "hsn_code": ""
     }
@@ -117,7 +110,6 @@ Raw Invoice Text to Parse:
 `;
 
 
- bf47cc2 (optimize ai flow)
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // CONFIDENCE SCORING (Rule-based + Anti-Hallucination)
@@ -279,7 +271,6 @@ const transcribeImage = async (image) => {
 
 
 
- bf47cc2 (optimize ai flow)
 const parseMarkdownToJSON = async (markdownText, modelId) => {
     const response = await getOpenAIClient().chat.completions.create({
         model: modelId,

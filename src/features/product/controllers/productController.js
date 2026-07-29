@@ -2,7 +2,6 @@ import bwipjs from "bwip-js";
 import crypto from "crypto";
 import Inventory from "../models/productModel.js";
 import { extractWithCascade } from "../../../core/services/llmService.js";
- bf47cc2 (optimize ai flow)
 import { safeParseJSON } from "../../../core/services/jsonParser.js";
 import { optimizeInvoiceImage } from "../../../core/services/imageOptimizer.js";
 import { normalizeImage } from "../../../core/middleware/imageNormalizationMiddleware.js";
@@ -481,7 +480,6 @@ const autoImportProducts = async (req, res) => {
             bill_date: manualBillDate,
             total_amount: manualTotalAmount ? Number(manualTotalAmount) : 0,
             processing_progress: 5, // Just started
- bf47cc2 (optimize ai flow)
         });
 
         const pendingPurchaseId = purchase._id.toString();
@@ -498,7 +496,6 @@ const autoImportProducts = async (req, res) => {
             try {
                 console.log("[1.5] Image compression start for", pendingPurchaseId);
                 await Purchase.findByIdAndUpdate(pendingPurchaseId, { processing_progress: 15 });
- bf47cc2 (optimize ai flow)
                 const { buffer: compressedBuffer, base64: imageBase64, mimeType } = await optimizeInvoiceImage(originalBuffer, originalMime);
 
                 // Start Cloudinary upload in parallel
@@ -512,7 +509,6 @@ const autoImportProducts = async (req, res) => {
                 const parsed = await extractWithCascade([{ base64: imageBase64, mimeType }]);
                 console.log("[3] LLM OCR Pipeline completed for", pendingPurchaseId);
                 await Purchase.findByIdAndUpdate(pendingPurchaseId, { processing_progress: 85 }); // Extraction complete
- bf47cc2 (optimize ai flow)
 
                 if (!parsed || !parsed.items || !Array.isArray(parsed.items)) {
                     throw new Error("Invalid pipeline response format: missing items array");
@@ -553,7 +549,6 @@ const autoImportProducts = async (req, res) => {
                     needs_manual_review: true, // Always require review for now
                     validation_warnings: parsed.validationWarnings || [],
                     processing_progress: 100,
- bf47cc2 (optimize ai flow)
                     ...(cloudResult && {
                         bill_image_url: cloudResult.secure_url,
                         cloudinary_public_id: cloudResult.public_id
@@ -567,7 +562,6 @@ const autoImportProducts = async (req, res) => {
                 await Purchase.findByIdAndUpdate(pendingPurchaseId, {
                     status: "failed",
                     processing_progress: 0,
- bf47cc2 (optimize ai flow)
                     notes: bgError.message
                 }).catch(() => {}); // ignore db errors during failure update
             }
