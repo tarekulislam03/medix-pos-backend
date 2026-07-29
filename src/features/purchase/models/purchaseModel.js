@@ -88,6 +88,13 @@ const purchaseSchema = new mongoose.Schema(
         },
 
         // OCR Pipeline metadata
+<<<<<<< HEAD
+=======
+        processing_progress: {
+            type: Number,
+            default: 0,
+        },
+>>>>>>> bf47cc2 (optimize ai flow)
         confidence_score: {
             type: Number,
             default: 1.0,
