@@ -1,4 +1,5 @@
 import Setting from "../models/settingsModel.js";
+import Store from "../../store/models/storeModel.js";
 
 /**
  * GET /api/v1/settings
@@ -9,13 +10,27 @@ import Setting from "../models/settingsModel.js";
 export const getSettings = async (req, res) => {
     try {
         const settings = await Setting.findOne({ storeId: req.storeId }).lean();
+        const store = await Store.findById(req.storeId).lean();
 
-        if (!settings) {
+        let data = {};
+
+        if (settings) {
+            // Strip Mongo internals before sending
+            const { _id, storeId, __v, createdAt, updatedAt, ...rest } = settings;
+            data = rest;
+        }
+
+        if (store) {
+            data.isTrial = store.isTrial || false;
+            data.trialStartDate = store.trialStartDate || null;
+            data.trialEndDate = store.trialEndDate || null;
+            data.mercyEndDate = store.mercyEndDate || null;
+        }
+
+        if (!settings && !store) {
             return res.status(200).json({ settings: null });
         }
 
-        // Strip Mongo internals before sending
-        const { _id, storeId, __v, createdAt, updatedAt, ...data } = settings;
         return res.status(200).json({ settings: data });
     } catch (err) {
         console.error("getSettings error:", err);

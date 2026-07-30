@@ -1,9 +1,55 @@
 import StoreSubscription from "../models/storeSubscriptionModel.js";
+import Store from "../../store/models/storeModel.js";
 
 // Get billing status for the logged-in store
 export const getBillingStatus = async (req, res) => {
   try {
     const storeId = req.storeId;
+    
+    // Check if store is on an expired trial
+    const store = await Store.findById(storeId).lean();
+    if (store) {
+      if (store.isBlocked) {
+        return res.status(200).json({
+          status: "blocked",
+          schedule: {
+            _id: "manual-blocked",
+            isManualBlock: true,
+            dueDate: new Date(),
+            amount: 0,
+            paymentStatus: "pending",
+            isCustom: false,
+            upiId: "",
+            blockDays: 0
+          }
+        });
+      }
+
+      if (store.isTrial && store.trialEndDate) {
+        const now = new Date();
+        const cutoffDate = store.mercyEndDate ? new Date(store.mercyEndDate) : new Date(store.trialEndDate);
+        
+        // Ensure the cutoff happens at the very end of the specified date
+        cutoffDate.setHours(23, 59, 59, 999);
+        
+        if (now > cutoffDate) {
+          return res.status(200).json({
+            status: "blocked",
+            schedule: {
+              _id: "trial-expired",
+              isTrialExpiration: true,
+              dueDate: store.trialEndDate,
+              amount: 0,
+              paymentStatus: "pending",
+              isCustom: false,
+              upiId: "",
+              blockDays: 0
+            }
+          });
+        }
+      }
+    }
+
     const subscription = await StoreSubscription.findOne({ storeId });
 
     if (!subscription) {

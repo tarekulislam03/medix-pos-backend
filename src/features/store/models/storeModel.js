@@ -17,6 +17,23 @@ const StoreSchema = new mongoose.Schema({
   },
   contactNumber: {
     type: String
+  },
+  isTrial: {
+    type: Boolean,
+    default: false
+  },
+  trialStartDate: {
+    type: Date
+  },
+  trialEndDate: {
+    type: Date
+  },
+  mercyEndDate: {
+    type: Date
+  },
+  isBlocked: {
+    type: Boolean,
+    default: false
   }
 }, { timestamps: true });
 

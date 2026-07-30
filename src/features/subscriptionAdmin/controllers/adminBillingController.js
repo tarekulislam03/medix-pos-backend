@@ -127,7 +127,7 @@ export const getAllSubscriptions = async (req, res) => {
 // Get all stores for the setup dropdown
 export const getAllStores = async (req, res) => {
   try {
-    const stores = await Store.find({}, "storeName contactNumber");
+    const stores = await Store.find({}, "storeName contactNumber email isTrial trialStartDate trialEndDate mercyEndDate isBlocked createdAt");
     res.status(200).json({ stores });
   } catch (error) {
     console.error("Get all stores error:", error);
@@ -231,6 +231,58 @@ export const removeCustomAlert = async (req, res) => {
     res.status(200).json({ message: "Custom alert removed successfully" });
   } catch (error) {
     console.error("Remove custom alert error:", error);
+    res.status(500).json({ message: "Internal server error" });
+  }
+};
+
+// Toggle Trial Status for a Store
+export const toggleTrial = async (req, res) => {
+  try {
+    const { storeId } = req.params;
+    const { isTrial, startDate, endDate, mercyEndDate } = req.body;
+
+    const store = await Store.findById(storeId);
+    if (!store) {
+      return res.status(404).json({ message: "Store not found" });
+    }
+
+    if (isTrial) {
+      store.isTrial = true;
+      store.trialStartDate = startDate ? new Date(startDate) : new Date();
+      store.trialEndDate = endDate ? new Date(endDate) : new Date(Date.now() + 14 * 24 * 60 * 60 * 1000);
+      store.mercyEndDate = mercyEndDate ? new Date(mercyEndDate) : null;
+    } else {
+      store.isTrial = false;
+      store.trialStartDate = null;
+      store.trialEndDate = null;
+      store.mercyEndDate = null;
+    }
+
+    await store.save();
+    res.status(200).json({ message: `Trial ${isTrial ? 'activated' : 'deactivated'} successfully`, store });
+  } catch (error) {
+    console.error("Toggle trial error:", error);
+    res.status(500).json({ message: "Internal server error" });
+  }
+};
+
+// Toggle Block Status for a Store
+export const toggleBlock = async (req, res) => {
+  try {
+    const { storeId } = req.params;
+    const { isBlocked } = req.body;
+
+    const store = await Store.findById(storeId);
+    if (!store) {
+      return res.status(404).json({ message: "Store not found" });
+    }
+
+    store.isBlocked = isBlocked;
+    await store.save();
+
+    res.status(200).json({ message: `Store ${isBlocked ? 'blocked' : 'unblocked'} successfully`, store });
+  } catch (error) {
+    console.error("Toggle block error:", error);
     res.status(500).json({ message: "Internal server error" });
   }
 };
