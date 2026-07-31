@@ -11,8 +11,7 @@ import {
 } from "../controllers/analyticsController.js";
 
 import { getBillingRecommendations } from "../controllers/recommendationController.js";
-import { sendMonthlyReports } from "../../../core/services/monthlyReportCron.js";
-import { isWhatsAppReady } from "../../../core/services/whatsappService.js";
+import { generateReportForStore } from "../controllers/whatsappReportController.js";
 
 const analyticsRouter = express.Router();
 
@@ -22,19 +21,8 @@ analyticsRouter.get("/live-requests", getLiveRequests);
 analyticsRouter.get("/health", getBackendHealth);
 analyticsRouter.get("/recommendations", protect, getBillingRecommendations);
 
-// Manual trigger for monthly WhatsApp report (for testing)
-analyticsRouter.post("/trigger-monthly-report", protect, async (req, res) => {
-    try {
-        if (!isWhatsAppReady()) {
-            return res.status(503).json({ success: false, message: "WhatsApp client is not ready. Please scan the QR code first." });
-        }
-        // Fire and forget — don't block the response
-        sendMonthlyReports();
-        return res.status(200).json({ success: true, message: "Monthly report job triggered. Check server logs." });
-    } catch (err) {
-        return res.status(500).json({ success: false, message: err.message });
-    }
-});
+// Generate report text for WhatsApp
+analyticsRouter.get("/whatsapp-report/:storeId", protect, generateReportForStore);
 
 export default analyticsRouter;
 
