@@ -1,6 +1,8 @@
 import app from "./app.js";
 import connectDB from "./config/database.js";
 import dotenv from "dotenv";
+import { initWhatsApp } from "./core/services/whatsappService.js";
+import { scheduleMonthlyWhatsAppReport } from "./core/services/monthlyReportCron.js";
 
 dotenv.config({ path: "./.env" });
 
@@ -12,6 +14,10 @@ const startServer = async () => {
 
         const server = app.listen(port, () => {
             console.log(`Server running on port ${port}!`);
+
+            // Initialize WhatsApp client & schedule monthly reports
+            initWhatsApp();
+            scheduleMonthlyWhatsAppReport();
         });
 
         // Handle Server Errors
